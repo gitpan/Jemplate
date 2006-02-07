@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Template 2.14;
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 use Jemplate::Parser;
 
@@ -83,7 +83,7 @@ This will compile all the templates into one Javascript file.
 
 You also need to get the Jemplate runtime.
 
-    > cp ~/Jemplate-0.xx/lib/Jemplate.js js/Jemplate.js
+    > cp ~/Jemplate-x.xx/share/Jemplate.js js/Jemplate.js
 
 Now all you need to do is include these two files in the HEAD of
 your html:
@@ -99,9 +99,16 @@ This early release of Jemplate only supports the following
 template features:
 
   * Plain text
-  * Variable substitution
+  * Simple [% variable %] substitution
+  * IF/ELSIF/ELSE
+  * PROCESS
 
 The remaining features will be added very soon.
+
+=head1 DEVELOPMENT
+
+Jemplate development is being discussed at
+irc://irc.freenode.net/#jemplate
 
 =head1 CREDIT
 
