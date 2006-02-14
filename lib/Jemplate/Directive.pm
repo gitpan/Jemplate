@@ -2,15 +2,8 @@ package Jemplate::Directive;
 use strict;
 use warnings;
 
-{   # XXX This is only temporarily here for debugging
-    no warnings 'redefine';
-    sub XXX {
-        require YAML;
-        die YAML::Dump(@_);
-    }
-}
-
 our $OUTPUT = 'output +=';
+our $WHILE_MAX = 1000;
 
 sub template {
     my ($class, $block) = @_;
@@ -108,6 +101,21 @@ sub assign {
 
 
 #------------------------------------------------------------------------
+# args(\@args)                                        foo, bar, baz = qux
+#------------------------------------------------------------------------
+
+sub args {
+    my ($class, $args) = @_;
+    my $hash = shift @$args;
+    push(@$args, '{ ' . join(', ', @$hash) . ' }')
+        if @$hash;
+
+    return '0' unless @$args;
+    return '[ ' . join(', ', @$args) . ' ]';
+}
+
+
+#------------------------------------------------------------------------
 # filenames(\@names)
 #------------------------------------------------------------------------
     
@@ -141,6 +149,17 @@ sub block {
 }
 
 #------------------------------------------------------------------------
+# call($expr)                                              [% CALL bar %]
+#------------------------------------------------------------------------
+
+sub call {
+    my ($class, $expr) = @_;
+    $expr .= ';';
+    return $expr;
+}
+
+
+#------------------------------------------------------------------------
 # set(\@setlist)                               [% foo = bar, baz = qux %]
 #------------------------------------------------------------------------
 
@@ -155,6 +174,22 @@ sub set {
 }
 
 
+#------------------------------------------------------------------------
+# include(\@nameargs)                    [% INCLUDE template foo = bar %] 
+#         # => [ [ $file, ... ], \@args ]
+#------------------------------------------------------------------------
+
+sub include {
+    my ($class, $nameargs) = @_;
+    my ($file, $args) = @$nameargs;
+    my $hash = shift @$args;
+    s/ => /: / for @$hash;
+    $file = $class->filenames($file);
+    $file .= @$hash ? ', { ' . join(', ', @$hash) . ' }' : '';
+    return "$OUTPUT context.include($file);"; 
+}   
+    
+        
 #------------------------------------------------------------------------
 # process(\@nameargs)                    [% PROCESS template foo = bar %] 
 #         # => [ [ $file, ... ], \@args ]
@@ -261,6 +296,79 @@ $block;
 EOF
 }
 
+
+#------------------------------------------------------------------------
+# next()                                                       [% NEXT %]
+#
+# Next iteration of a FOREACH loop (experimental)
+#------------------------------------------------------------------------
+
+sub next {
+    return "continue;";
+}
+
+
+#------------------------------------------------------------------------
+# while($expr, $block)                                 [% WHILE x < 10 %]
+#                                                         ...
+#                                                      [% END %]
+#------------------------------------------------------------------------
+
+sub while {
+    my ($class, $expr, $block) = @_; 
+    
+    return <<EOF;
+    
+// WHILE
+var failsafe = $WHILE_MAX;
+while (--failsafe && ($expr)) {
+$block
+}
+if (! failsafe)
+    throw("WHILE loop terminated (> $WHILE_MAX iterations)\\n")
+EOF
+}
+
+
+#------------------------------------------------------------------------
+# clear()                                                     [% CLEAR %]
+#   
+# NOTE: this is redundant, being hard-coded (for now) into Parser.yp
+#------------------------------------------------------------------------
+
+sub clear {
+    return "output = '';";
+}
+
+
+#------------------------------------------------------------------------
+# break()                                                     [% BREAK %]
+#   
+# NOTE: this is redundant, being hard-coded (for now) into Parser.yp
+#------------------------------------------------------------------------
+
+sub break {
+    return 'break;';
+}                       
+        
+#------------------------------------------------------------------------
+# return()                                                   [% RETURN %]
+#------------------------------------------------------------------------
+
+sub return {
+    return "return output;"
+}
+
+
+#------------------------------------------------------------------------
+# stop()                                                       [% STOP %]
+#------------------------------------------------------------------------
+
+sub stop {
+    return "throw('Jemplate.STOP\\n' + output);";
+}   
+
+    
 1;
 
 =head1 NAME

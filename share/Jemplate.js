@@ -23,7 +23,15 @@ Jemplate.templateMap = {};
 Jemplate.process = function(template, data, output) {
     var context = new Jemplate.Context();
     context.stash = new Jemplate.Stash();
-    var result = context.process(template, data);
+    var result;
+    try { 
+        result = context.process(template, data);
+    }
+    catch(e) {
+        if (! e.match(/Jemplate\.STOP\n/))
+            throw(e);
+        result = e.replace(/Jemplate\.STOP\n/, '')
+    } 
 
     if (typeof(output) == 'undefined')
         return result;
@@ -49,6 +57,10 @@ if (typeof(Jemplate.Context) == 'undefined')
     Jemplate.Context = function() {};
 
 proto = Jemplate.Context.prototype;
+
+proto.include = function(template, args) {
+    this.process(template, args);
+}
 
 proto.process = function(template, args) {
     if (typeof(args) != 'undefined')
@@ -80,7 +92,15 @@ proto.add = function(object) {
 }
 
 proto.get = function(key) {
-    return this[key];
+    if (! (key instanceof Array)) {
+        value = this[key];
+        if (typeof(value) == 'function')
+            value = value();
+    }
+    else {
+        throw('Jemplate.Stash.get error. Key = ' + key);
+    }
+    return value;
 }
 
 proto.set = function(key, value) {

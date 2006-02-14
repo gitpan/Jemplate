@@ -1,17 +1,18 @@
 use t::TestJemplate tests => 1;
 
 filters { 'tt' => 'parse_lite' };
+no_diff;
 run_is 'tt' => 'js';
 
 __END__
 
-=== TT Comments
+=== CLEAR
 --- tt
-[%# foo.bar %]
-[% foo.baz %]
+Bar
+[% CLEAR -%]
+Foo
 --- js
-output += '\n';
+output += 'Bar\n';
 //line 2 "(unknown template)"
-output += stash.get(['foo', 0, 'baz', 0]);
-output += '\n';
-
+output = '';
+output += 'Foo\n';
