@@ -28,9 +28,9 @@ Jemplate.process = function(template, data, output) {
         result = context.process(template, data);
     }
     catch(e) {
-        if (! e.match(/Jemplate\.STOP\n/))
+        if (! e.toString().match(/Jemplate\.STOP\n/))
             throw(e);
-        result = e.replace(/Jemplate\.STOP\n/, '')
+        result = e.toString().replace(/Jemplate\.STOP\n/, '')
     } 
 
     if (typeof(output) == 'undefined')
@@ -59,7 +59,7 @@ if (typeof(Jemplate.Context) == 'undefined')
 proto = Jemplate.Context.prototype;
 
 proto.include = function(template, args) {
-    this.process(template, args);
+    return this.process(template, args);
 }
 
 proto.process = function(template, args) {
@@ -79,8 +79,11 @@ proto.set_error = function(error, output) {
 //------------------------------------------------------------------------------
 // Jemplate.Stash class
 //------------------------------------------------------------------------------
-if (typeof(Jemplate.Stash) == 'undefined')
-    Jemplate.Stash = function() {};
+if (typeof(Jemplate.Stash) == 'undefined') {
+    Jemplate.Stash = function() {
+        this.data = {};
+    };
+}
 
 proto = Jemplate.Stash.prototype;
 
@@ -92,20 +95,158 @@ proto.add = function(object) {
 }
 
 proto.get = function(key) {
-    if (! (key instanceof Array)) {
-        value = this[key];
-        if (typeof(value) == 'function')
-            value = value();
+    var root = this.data;
+    if (key instanceof Array) {
+        for (var i = 0; i < key.length; i += 2) {
+            var args = key.slice(i, i+2);
+            args.unshift(root);
+            value = this._dotop.apply(this, args);
+            if (typeof(value) == 'undefined')
+                break;
+            root = value;
+        }
     }
     else {
-        throw('Jemplate.Stash.get error. Key = ' + key);
+        value = this._dotop(root, key);
     }
+
     return value;
 }
 
 proto.set = function(key, value) {
-    this[key] = value;
+    this.data[key] = value;
 }
+
+proto._dotop = function(root, item, args) {
+    if (typeof(item) == 'undefined' || item.match(/^[\._]/))
+        return undefined;
+
+    if (typeof root == 'string' && this.string_functions[item])
+        return this.string_functions[item](root, args);
+    if (root instanceof Array && this.list_functions[item])
+        return this.list_functions[item](root, args);
+    if (typeof root == 'object' && this.hash_functions[item])
+        return this.hash_functions[item](root, args);
+
+    var value = root[item];
+    if (typeof(value) == 'function')
+        value = value();
+    return value;
+}
+
+proto.string_functions = {};
+
+proto.list_functions = {};
+
+proto.list_functions.join = function(list, args) {
+    return list.join(args[0]);
+};
+
+proto.list_functions.sort = function(list) {
+    return list.sort();
+}
+
+proto.list_functions.nsort = function(list) {
+    return list.sort(function(a, b) { return (a-b) });
+}
+
+proto.list_functions.grep = function(list, args) {
+    var regexp = new RegExp(args[0]);
+    var result = [];
+    for (var i = 0; i < list.length; i++) {
+        if (list[i].match(regexp))
+            result.push(list[i]);
+    }
+    return result;
+}
+
+proto.list_functions.unique = function(list) {
+    var result = [];
+    var seen = {};
+    for (var i = 0; i < list.length; i++) {
+        var elem = list[i];
+        if (! seen[elem])
+            result.push(elem);
+        seen[elem] = true;
+    }
+    return result;
+}
+
+proto.list_functions.reverse = function(list) {
+    var result = [];
+    for (var i = list.length - 1; i >= 0; i--) {
+        result.push(list[i]);
+    }
+    return result;
+}
+
+proto.list_functions.merge = function(list, args) {
+    var result = [];
+    var push_all = function(elem) {
+        if (elem instanceof Array) {
+            for (var j = 0; j < elem.length; j++) {
+                result.push(elem[j]);
+            }
+        }
+        else {
+            result.push(elem);
+        }
+    }
+    push_all(list);
+    for (var i = 0; i < args.length; i++) {
+        push_all(args[i]);
+    }
+    return result;
+}
+
+proto.list_functions.slice = function(list, args) {
+    return list.slice(args[0], args[1]);
+}
+
+proto.list_functions.splice = function(list, args) {
+    if (args.length == 1)
+        return list.splice(args[0]);
+    if (args.length == 2)
+        return list.splice(args[0], args[1]);
+    if (args.length == 3)
+        return list.splice(args[0], args[1], args[2]);
+}
+
+proto.list_functions.push = function(list, args) {
+    list.push(args[0]);
+    return list;        
+}
+
+proto.list_functions.pop = function(list) {
+    return list.pop();
+}
+
+proto.list_functions.unshift = function(list, args) {
+    list.unshift(args[0]);
+    return list;        
+}
+
+proto.list_functions.shift = function(list) {
+    return list.shift();
+}
+
+proto.list_functions.first = function(list) {
+    return list[0];        
+}
+
+proto.list_functions.size = function(list) {
+    return list.length;
+}
+
+proto.list_functions.max = function(list) {
+    return list.length - 1;
+}
+
+proto.list_functions.last = function(list) {
+    return list.slice(-1);        
+}
+
+proto.hash_functions = {};
 
 //------------------------------------------------------------------------------
 // Jemplate.Iterator class

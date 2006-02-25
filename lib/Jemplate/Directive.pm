@@ -183,7 +183,6 @@ sub include {
     my ($class, $nameargs) = @_;
     my ($file, $args) = @$nameargs;
     my $hash = shift @$args;
-    s/ => /: / for @$hash;
     $file = $class->filenames($file);
     $file .= @$hash ? ', { ' . join(', ', @$hash) . ' }' : '';
     return "$OUTPUT context.include($file);"; 
@@ -199,7 +198,6 @@ sub process {
     my ($class, $nameargs) = @_;
     my ($file, $args) = @$nameargs;
     my $hash = shift @$args;
-    s/ => /: / for @$hash;
     $file = $class->filenames($file);
     $file .= @$hash ? ', { ' . join(', ', @$hash) . ' }' : '';
     return "$OUTPUT context.process($file);"; 
@@ -256,7 +254,7 @@ sub foreach {
     if ($target) {
         $loop_save =
             'try { oldloop = ' . $class->ident(["'loop'"]) . ' } finally {}';
-        $loop_set = "stash['$target'] = value";
+        $loop_set = "stash.data['$target'] = value";
         $loop_restore = "stash.set('loop', oldloop)";
     }
     else {
@@ -307,6 +305,57 @@ sub next {
     return "continue;";
 }
 
+#------------------------------------------------------------------------
+# wrapper(\@nameargs, $block)            [% WRAPPER template foo = bar %] 
+#          # => [ [$file,...], \@args ]    
+#------------------------------------------------------------------------
+sub wrapper {
+    my ($class, $nameargs, $block) = @_;
+    my ($file, $args) = @$nameargs;
+    my $hash = shift @$args;
+
+    s/ => /: / for @$hash;
+    return $class->multi_wrapper($file, $hash, $block)
+        if @$file > 1;
+    $file = shift @$file;
+    push(@$hash, "'content': output");
+    $file .= @$hash ? ', { ' . join(', ', @$hash) . ' }' : '';
+
+    return <<EOF;
+
+// WRAPPER
+$OUTPUT (function() {
+    var output = '';
+$block;
+    return context.include($file);
+})();
+EOF
+}
+
+sub multi_wrapper {
+    my ($class, $file, $hash, $block) = @_;
+
+    push(@$hash, "'content': output");
+    $hash = @$hash ? ', { ' . join(', ', @$hash) . ' }' : '';
+
+    $file = join(', ', reverse @$file);
+#    print STDERR "multi wrapper: $file\n";
+
+    return <<EOF;
+
+// WRAPPER
+$OUTPUT (function() {
+    var output = '';
+$block;
+    var files = new Array($file);
+    for (var i = 0; i < files.length; i++) {
+        output = context.include(files[i]$hash);
+    }
+    return output;
+})();
+EOF
+}
+
 
 #------------------------------------------------------------------------
 # while($expr, $block)                                 [% WHILE x < 10 %]
@@ -326,6 +375,52 @@ $block
 }
 if (! failsafe)
     throw("WHILE loop terminated (> $WHILE_MAX iterations)\\n")
+EOF
+}
+
+
+#------------------------------------------------------------------------
+# switch($expr, \@case)                                    [% SWITCH %]
+#                                                          [% CASE foo %]
+#                                                             ...
+#                                                          [% END %]
+#------------------------------------------------------------------------
+
+sub switch {
+    my ($class, $expr, $case) = @_;
+    my @case = @$case;
+    my ($match, $block, $default);
+    my $caseblock = '';
+
+    $default = pop @case;
+
+    foreach $case (@case) {
+        $match = $case->[0];
+        $block = $case->[1];
+#        $block = pad($block, 1) if $PRETTY;
+        $caseblock .= <<EOF;
+case $match:
+$block
+break;
+
+EOF
+    }
+
+    if (defined $default) {
+        $caseblock .= <<EOF;
+default:
+$default
+break;
+EOF
+    }
+#    $caseblock = pad($caseblock, 2) if $PRETTY;
+
+return <<EOF;
+
+    switch($expr) {
+$caseblock
+    }
+
 EOF
 }
 
@@ -366,6 +461,26 @@ sub return {
 
 sub stop {
     return "throw('Jemplate.STOP\\n' + output);";
+}   
+
+#------------------------------------------------------------------------
+# stubs()                                                      [% STOP %]
+#------------------------------------------------------------------------
+
+sub filter {
+    return "throw('FILTER not yet supported in Jemplate');";
+}   
+
+sub quoted {
+    return "throw('QUOTED not yet supported in Jemplate');";
+}   
+
+sub macro {
+    return "throw('MACRO not yet supported in Jemplate');";
+}   
+
+sub capture {
+    return "throw('CAPTURE not yet supported in Jemplate');";
 }   
 
     
