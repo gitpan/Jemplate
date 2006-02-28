@@ -49,7 +49,7 @@ my ($factory, $rawstart);
 
 @RESERVED = qw( 
 	GET CALL SET DEFAULT INSERT INCLUDE PROCESS WRAPPER BLOCK END
-	USE PLUGIN FILTER MACRO PERL RAWPERL TO STEP AND OR NOT DIV MOD
+	USE PLUGIN FILTER MACRO JAVASCRIPT TO STEP AND OR NOT DIV MOD
 	IF UNLESS ELSE ELSIF FOR NEXT WHILE SWITCH CASE META IN
 	TRY THROW CATCH FINAL LAST RETURN STOP CLEAR VIEW DEBUG
     );
@@ -61,8 +61,8 @@ my ($factory, $rawstart);
 # briefly for v2.04d and then took them out again in 2.04e.
 
 %CMPOP = qw( 
-    != ne
-    == eq
+    != !=
+    == ==
     <  <
     >  >
     >= >=

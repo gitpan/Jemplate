@@ -5,6 +5,10 @@ use warnings;
 our $OUTPUT = 'output +=';
 our $WHILE_MAX = 1000;
 
+# parser state variable
+# only true when inside JAVASCRIPT blocks
+our $INJAVASCRIPT = 0;
+
 sub template {
     my ($class, $block) = @_;
 
@@ -35,6 +39,7 @@ $block
 
 sub textblock {
     my ($class, $text) = @_;
+    return $text if $INJAVASCRIPT;
     return "$OUTPUT " . $class->text($text) . ';';
 }
 
@@ -47,6 +52,7 @@ sub text {
     for ($text) {
         s/([\'\\])/\\$1/g;
         s/\n/\\n/g;
+        s/\r/\\r/g;
     }
     return "'" . $text . "'";
 }
@@ -217,12 +223,10 @@ sub if {
     my @else = $else ? @$else : ();
     $else = pop @else;
 
-    $expr = _fix_expr($expr);
     my $output = "if ($expr) {\n$block\n}\n";
         
     foreach my $elsif (@else) {
         ($expr, $block) = @$elsif;
-        $expr = _fix_expr($expr);
         $output .= "else if ($expr) {\n$block\n}\n";
     }   
     if (defined $else) {
@@ -230,13 +234,6 @@ sub if {
     }
 
     return $output;
-}
-
-# XXX A very nasty hack until I learn more.
-sub _fix_expr {
-    my $expr = shift;
-    $expr =~ s/ eq / == /g;
-    return $expr;
 }
 
 #------------------------------------------------------------------------
@@ -378,6 +375,20 @@ if (! failsafe)
 EOF
 }
 
+#------------------------------------------------------------------------
+# javascript($script)                                   [% JAVASCRIPT %]
+#                                                           ...
+#                                                       [% END %]
+#------------------------------------------------------------------------
+sub javascript {
+    my ( $class, $javascript ) = @_;
+    return $javascript;
+}
+
+sub no_javascript {
+    my ( $class ) = @_;
+    die "EVAL_JAVASCRIPT has not been enabled, cannot process [% JAVASCRIPT %] blocks";
+}
 
 #------------------------------------------------------------------------
 # switch($expr, \@case)                                    [% SWITCH %]
@@ -426,6 +437,22 @@ EOF
 
 
 #------------------------------------------------------------------------
+# throw(\@nameargs)                           [% THROW foo "bar error" %]
+#       # => [ [$type], \@args ]
+#------------------------------------------------------------------------
+
+sub throw {
+    my ($class, $nameargs) = @_;
+    my ($type, $args) = @$nameargs;
+    my $hash = shift(@$args);
+    my $info = shift(@$args);
+    $type = shift @$type;
+
+    return qq{throw([$type, $info]);};
+}
+
+
+#------------------------------------------------------------------------
 # clear()                                                     [% CLEAR %]
 #   
 # NOTE: this is redundant, being hard-coded (for now) into Parser.yp
@@ -468,11 +495,32 @@ sub stop {
 #------------------------------------------------------------------------
 
 sub filter {
-    return "throw('FILTER not yet supported in Jemplate');";
-}   
+    my ($class, $lnameargs, $block) = @_;
+    my ($name, $args, $alias) = @$lnameargs;
+    $name = shift @$name;
+    $args = &args($class, $args);
+    $args = $args ? "$args, $alias" : ", null, $alias"
+        if $alias;
+    $name .= ", $args" if $args;
+    return <<EOF;
+
+// FILTER
+$OUTPUT (function() {
+    var output = '';
+
+$block
+
+    return context.filter($name, output);
+})();
+EOF
+}
 
 sub quoted {
-    return "throw('QUOTED not yet supported in Jemplate');";
+    my $class = shift;
+    if ( @_ && ref($_[0]) ) {
+        return join( " + ", @{$_[0]} );
+    }
+    return "throw('QUOTED called with unknown arguments in Jemplate');";
 }   
 
 sub macro {

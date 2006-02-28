@@ -6,7 +6,10 @@
 #   Definition of the parser grammar for the Template Toolkit language.
 #
 # AUTHOR
-#   Andy Wardley <abw@wardley.org> 
+#   Ingy döt Net   <ingy@cpan.org>
+#
+# ORIGINAL AUTHOR
+#   Andy Wardley   <abw@kfs.org>
 #
 # HISTORY
 #   Totally re-written for version 2, based on Doug Steinwand's 
@@ -21,6 +24,7 @@
 #   I'm loathed to hack it up too much right now.  Maybe later.
 #
 # COPYRIGHT
+#   Copyright (C) 2006 Ingy döt Net.  All Rights Reserved.
 #   Copyright (C) 1996-2004 Andy Wardley.  All Rights Reserved.
 #   Copyright (C) 1998-2004 Canon Research Centre Europe Ltd.
 #
@@ -98,6 +102,7 @@ directive:  setlist		    { $factory->set($_[1])                }
 	|   switch
 	|   loop
 	|   try
+        |   javascript
 	|   perl
 ;
 
@@ -210,19 +215,11 @@ view:	    VIEW nameargs ';'	    { $_[0]->push_defblock();		  }
 						     $_[0]->pop_defblock) }
 ;
 
-perl:	    PERL ';'                { ${$_[0]->{ INPERL }}++;             }
-	      block END		    { ${$_[0]->{ INPERL }}--;
-				      $_[0]->{ EVAL_PERL } 
-				      ? $factory->perl($_[4])             
-				      : $factory->no_perl();              }
-;
-
-rawperl:    RAWPERL                 { ${$_[0]->{ INPERL }}++; 
-				      $rawstart = ${$_[0]->{'LINE'}};     }
-	    ';' TEXT END	    { ${$_[0]->{ INPERL }}--;
-				      $_[0]->{ EVAL_PERL } 
-				      ? $factory->rawperl($_[4], $rawstart)
-				      : $factory->no_perl();              }
+javascript: JAVASCRIPT ';'                { ${$_[0]->{ INJAVASCRIPT }}++;             }
+	      block END		    { ${$_[0]->{ INJAVASCRIPT }}--;
+				      $_[0]->{ EVAL_JAVASCRIPT } 
+				      ? $factory->javascript($_[4])             
+				      : $factory->no_javascript();              }
 ;
 
 filter:	    FILTER lnameargs ';' 
@@ -357,7 +354,7 @@ expr:	    expr BINOP expr	    { "$_[1] $_[2] $_[3]"                 }
 	|   expr DIV expr	    { "int($_[1] / $_[3])"                }
 	|   expr MOD expr	    { "$_[1] % $_[3]"                     }
 	|   expr CMPOP expr	    { "$_[1] $CMPOP{ $_[2] } $_[3]"       }
-	|   expr CAT expr	    { "$_[1]  . $_[3]"                    }
+	|   expr CAT expr	    { "$_[1]  + $_[3]"                    }
 	|   expr AND expr	    { "$_[1] && $_[3]"                    }
 	|   expr OR expr	    { "$_[1] || $_[3]"                    }
 	|   NOT expr		    { "! $_[2]"                           }

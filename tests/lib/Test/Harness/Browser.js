@@ -107,11 +107,20 @@ if (window.parent != window &&
         var node = document.createElement("pre");
         node.setAttribute("id", "output");
         document.body.appendChild(node);
+        // Brutal hack to make output linkable
+        fixoutput = function(node) {
+            // Trailing space added and replaced to work around yet another
+            // Safari bug.
+            node.innerHTML = node.innerHTML.replace(
+                / ?(\w[\w\.]+?\w)(?=\.\.\.)/m, '<a href="$1">$1</a>'
+            ) + ' ';
+        };
         return {
             pass: function (msg) {
                 node.appendChild(document.createTextNode(msg));
                 window.scrollTo(0, document.body.offsetHeight
                                 || document.body.scrollHeight);
+                fixoutput(node);
             },
             fail: function (msg) {
                 var red = document.createElement("span");
