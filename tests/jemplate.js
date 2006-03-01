@@ -221,6 +221,371 @@ output += '\n';;
     return output;
 }
 
+Jemplate.templateMap['filters_html.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 3 "filters_html.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += 'This is some html text\nAll the <tags> should be escaped & protected\n';
+
+    return context.filter(output, 'html');
+})();
+
+output += '\n';
+//line 4 "filters_html.html"
+stash.set('text', 'The <cat> sat on the <mat>');
+output += '\n';
+//line 5 "filters_html.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += stash.get('text');
+
+    return context.filter(output, 'html');
+})();
+
+output += '\n';
+//line 7 "filters_html.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += '\n"It isn\'t what I expected", he replied.';
+
+    return context.filter(output, 'html');
+})();
+
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['filters_indent.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 7 "filters_indent.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += '1\n2\n3\n4';
+
+    return context.filter(output, 'indent');
+})();
+
+output += '\n#\n';
+//line 15 "filters_indent.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += '1\n2\n3\n4';
+
+    return context.filter(output, 'indent', [ 3 ]);
+})();
+
+output += '\n#\n';
+//line 23 "filters_indent.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += '1\n2\n3\n4';
+
+    return context.filter(output, 'indent', [ '2' ]);
+})();
+
+output += '\n#\n';
+//line 31 "filters_indent.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += '1\n2\n3\n4';
+
+    return context.filter(output, 'indent', [ 0 ]);
+})();
+
+output += '\n#\n';
+//line 33 "filters_indent.html"
+stash.set('text', 'The cat sat on the mat');
+//line 33 "filters_indent.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += stash.get('text');
+
+    return context.filter(output, 'indent', [ '> ' ]);
+})();
+
+
+    return context.filter(output, 'indent', [ '+' ]);
+})();
+
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['filters_null.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "filters_null.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += 'Ils ont les chapeaux ronds, vive la bretagne';
+
+    return context.filter(output, 'null');
+})();
+
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['filters_repeat.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "filters_repeat.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += 'foo...';
+
+    return context.filter(output, 'repeat', [ 5 ]);
+})();
+
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['filters_truncate.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "filters_truncate.html"
+stash.set('a', '1234567890');
+//line 2 "filters_truncate.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += stash.get('a');
+
+    return context.filter(output, 'truncate', [ 5 ]);
+})();
+
+output += '\n';
+//line 3 "filters_truncate.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += stash.get('a');
+
+    return context.filter(output, 'truncate', [ 10 ]);
+})();
+
+output += '\n';
+//line 4 "filters_truncate.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += stash.get('a');
+
+    return context.filter(output, 'truncate', [ 15 ]);
+})();
+
+output += '\n';
+//line 5 "filters_truncate.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += stash.get('a');
+
+    return context.filter(output, 'truncate', [ 2 ]);
+})();
+
+output += '\n';
+//line 6 "filters_truncate.html"
+stash.set('a', '1234567890123456789012345678901234567890');
+//line 7 "filters_truncate.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += stash.get('a');
+
+    return context.filter(output, 'truncate');
+})();
+
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['filters_uri.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "filters_uri.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += 'my file.html';
+
+    return context.filter(output, 'uri');
+})();
+
+output += '\n';
+//line 2 "filters_uri.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += 'my<file & your>file.html';
+
+    return context.filter(output, 'uri');
+})();
+
+output += '\n';
+//line 3 "filters_uri.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += 'my<file & your>file.html';
+
+    return context.filter(output, 'uri');
+})();
+
+
+    return context.filter(output, 'html');
+})();
+
+output += '\n';
+//line 4 "filters_uri.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += 'guitar&amp;file.html';
+
+    return context.filter(output, 'uri');
+})();
+
+output += '\n';
+//line 5 "filters_uri.html"
+
+// FILTER
+output += (function() {
+    var output = '';
+
+
+// FILTER
+output += (function() {
+    var output = '';
+
+output += 'guitar&amp;file.html';
+
+    return context.filter(output, 'uri');
+})();
+
+
+    return context.filter(output, 'html');
+})();
+
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
 Jemplate.templateMap['hello.html'] = function(context) {
     if (! context) throw('Jemplate function called without context\n');
     var stash = context.stash;
@@ -384,6 +749,272 @@ Jemplate.templateMap['operator3.html'] = function(context) {
     try {
 //line 1 "operator3.html"
 output += 'abc'  + 'def';
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['string_chunk.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "string_chunk.html"
+stash.set('a', '1234567890');
+//line 2 "string_chunk.html"
+output += stash.get(['a', 0, 'chunk', 0, 'join', [ ' ' ]]);
+output += '\n';
+//line 3 "string_chunk.html"
+output += stash.get(['a', 0, 'chunk', [ 2 ], 'join', [ ' ' ]]);
+output += '\n';
+//line 4 "string_chunk.html"
+output += stash.get(['a', 0, 'chunk', [ 3 ], 'join', [ ' ' ]]);
+output += '\n';
+//line 5 "string_chunk.html"
+output += stash.get(['a', 0, 'chunk', [ 9 ], 'join', [ ' ' ]]);
+output += '\n';
+//line 6 "string_chunk.html"
+output += stash.get(['a', 0, 'chunk', [ 10 ], 'join', [ ' ' ]]);
+output += '\n';
+//line 7 "string_chunk.html"
+output += stash.get(['a', 0, 'chunk', [ -1 ], 'join', [ ' ' ]]);
+output += '\n';
+//line 8 "string_chunk.html"
+output += stash.get(['a', 0, 'chunk', [ -2 ], 'join', [ ' ' ]]);
+output += '\n';
+//line 9 "string_chunk.html"
+output += stash.get(['a', 0, 'chunk', [ -3 ], 'join', [ ' ' ]]);
+output += '\n';
+//line 10 "string_chunk.html"
+output += stash.get(['a', 0, 'chunk', [ -9 ], 'join', [ ' ' ]]);
+output += '\n';
+//line 11 "string_chunk.html"
+output += stash.get(['a', 0, 'chunk', [ -10 ], 'join', [ ' ' ]]);
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['string_defined.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "string_defined.html"
+stash.set('a', '1');
+//line 2 "string_defined.html"
+output += stash.get(['a', 0, 'defined', 0]) ? '1' : '0';
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['string_hash.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "string_hash.html"
+stash.set('a', 'Hi');
+//line 2 "string_hash.html"
+output += stash.get(['a', 0, 'hash', 0, 'value', 0]);
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['string_length.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "string_length.html"
+stash.set('a', 'Hi');
+//line 2 "string_length.html"
+output += stash.get(['a', 0, 'length', 0]);
+output += '\n';
+//line 3 "string_length.html"
+stash.set('a', 10);
+//line 4 "string_length.html"
+output += stash.get(['a', 0, 'length', 0]);
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['string_list.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "string_list.html"
+stash.set('a', 'Hi');
+//line 2 "string_list.html"
+output += stash.get(['a', 0, 'list', 0, 0, 0]);
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['string_match.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "string_match.html"
+stash.set('a', 'aaa12aaa34aaa56');
+//line 2 "string_match.html"
+output += stash.get(['a', 0, 'match', [ '\\\d\\\d' ], 'join', [ ' ' ]]);
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['string_repeat.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "string_repeat.html"
+stash.set('a', 'aaa');
+//line 2 "string_repeat.html"
+output += stash.get(['a', 0, 'repeat', [ 3 ]]);
+output += '\n';
+//line 3 "string_repeat.html"
+output += stash.get(['a', 0, 'repeat', 0]);
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['string_replace.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "string_replace.html"
+stash.set('a', 'aaa12aaa34aaa56');
+//line 2 "string_replace.html"
+output += stash.get(['a', 0, 'replace', [ '\\\d\\\d', 'bb' ]]);
+output += '\n';
+//line 3 "string_replace.html"
+output += stash.get(['a', 0, 'replace', [ '\\\d\\\d' ]]);
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['string_search.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "string_search.html"
+stash.set('a', 'aaa12aaa34aaa56');
+//line 2 "string_search.html"
+output += stash.get(['a', 0, 'search', [ '\\\d\\\d' ]]) ? 1 : 0;
+output += '\n';
+//line 3 "string_search.html"
+output += stash.get(['a', 0, 'search', [ 'w' ]]) ? 1 : 0;
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['string_size.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "string_size.html"
+stash.set('a', '1');
+//line 2 "string_size.html"
+output += stash.get(['a', 0, 'defined', 0]) ? '1' : '0';
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['string_split.html'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+//line 1 "string_split.html"
+stash.set('a', 'aaa12aaa34aaa');
+//line 2 "string_split.html"
+output += stash.get(['a', 0, 'split', [ '\\\d\\\d' ], 'join', [ ' ' ]]);
+output += '\n';
+//line 3 "string_split.html"
+stash.set('a', '1aaa2aaa3aaa4');
+//line 4 "string_split.html"
+output += stash.get(['a', 0, 'split', [ 'aaa' ], 'join', [ ' ' ]]);
 output += '\n';
     }
     catch(e) {

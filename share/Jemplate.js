@@ -38,32 +38,34 @@ Jemplate.process = function(template, data, output) {
 
         if (typeof output == 'undefined')
             return result;
-        else if (typeof output == 'function')
+        if (typeof output == 'function') {
             output(result);
-        else if (output instanceof HTMLElement)
-            output.innerHTML = result;
-        else if (output.match(/^#[\w\-]+$/)) {
-            var id = output.replace(/^#/, '');
-            var element = document.getElementById(id);
-            if (typeof element == 'undefined')
-                throw('No element found with id="' + id + '"');
-            element.innerHTML = result;
+            return;
         }
-        else
-            throw("Invalid arguments in call to Jemplate.process");
+        if (output instanceof String) {
+            if (output.match(/^#[\w\-]+$/)) {
+                var id = output.replace(/^#/, '');
+                var element = document.getElementById(id);
+                if (typeof element == 'undefined')
+                    throw('No element found with id="' + id + '"');
+                element.innerHTML = result;
+                return;
+            }
+        }
+        else {
+            output.innerHTML = result;
+            return;
+        }
+
+        throw("Invalid arguments in call to Jemplate.process");
 
         return 1;
-    }
-
-    var req = null;
-    var async = function() {
-        proc(JSON.parse(req.responseText));
     }
 
     if (typeof data == 'function')
         data = data();
     else if (typeof data == 'string') {
-        req = Ajax.get(data, async);
+        Ajax.get(data, function(r) { proc(JSON.parse(r)) });
         return;
     }
 
@@ -96,11 +98,11 @@ proto.set_error = function(error, output) {
     return error;
 }
 
-proto.filter = function(name, args, text) {
+proto.filter = function(text, name, args) {
     if (name == 'null') 
-        return '';
+        name = "null_filter";
     if (typeof this._filter.filters[name] == "function") 
-        return this._filter.filters[name](args, text, this);  
+        return this._filter.filters[name](text, args, this);  
     else 
         throw "Unknown filter name ':" + name + "'";
 }
@@ -115,6 +117,10 @@ if (typeof Jemplate.Filter == 'undefined') {
 proto = Jemplate.Filter.prototype;
 
 proto.filters = {};
+
+proto.filters.null_filter = function(text) {
+    return ''; 
+}
 
 proto.filters.upper = function(text) {
     return text.toUpperCase();
@@ -145,10 +151,10 @@ proto.filters.collapse = function(text) {
 }
 
 proto.filters.html = function(text) {
-    text = text.replace(/&/, '&amp;'); 
-    text = text.replace(/</, '&lt;');
-    text = text.replace(/>/, '&gt;');
-    text = text.replace(/"/, '&quot;');
+    text = text.replace(/&/g, '&amp;'); 
+    text = text.replace(/</g, '&lt;');
+    text = text.replace(/>/g, '&gt;');
+    text = text.replace(/"/g, '&quot;');
     return text;
 }
 
@@ -157,26 +163,56 @@ proto.filters.html_para = function(text) {
     return "<p>\n" + lines.join("\n</p>\n\n<p>\n") + "</p>\n";
 }
 
-proto.filters.html_break = function(test) {
-    return test.replace(/(\r?\n){2,}/g, "$1<br />$1<br />$1");
+proto.filters.html_break = function(text) {
+    return text.replace(/(\r?\n){2,}/g, "$1<br />$1<br />$1");
 }
 
-proto.filters.html_line_break = function(test) {
-    return test.replace(/(\r?\n)/g, "$1<br />$1");
+proto.filters.html_line_break = function(text) {
+    return text.replace(/(\r?\n)/g, "$1<br />$1");
 }
 
-proto.filters.uri = function(test) {
-    return encodeURI(test);
+proto.filters.uri = function(text) {
+    return encodeURI(text);
 }
 
-proto.filters.indent = function(pad, text) {
+proto.filters.indent = function(text, pad) {
+    if (! text) return;
     if (! pad) 
         pad = 4;
-    var finalpad;
-    for (var i = 0; i< pad; i++) {
-        finalpad += ' '; // xxx check match \d 
+
+    var finalpad = '';
+    if (typeof pad == 'number' || String(pad).match(/^\d$/)) {
+        for (var i = 0; i < pad; i++) {
+            finalpad += ' '; 
+        }
+    } else {
+        finalpad = pad;
     }
-    var output = text.replace(/^/, finalpad);
+    var output = text.replace(/^/gm, finalpad);
+    return output;
+}
+
+proto.filters.truncate = function(text, len) {
+    if (! text) return;
+    if (! len) 
+        len = 32;
+    // This should probably be <=, but TT just uses <
+    if (text.length < len)
+        return text;
+    var newlen = len - 3;
+    return text.substr(0,newlen) + '...';
+}
+
+proto.filters.repeat = function(text, iter) {
+    if (! text) return;
+    if (! iter || iter == 0) 
+        iter = 1;
+    if (iter == 1) return text
+    
+    var output = text;
+    for (var i = 1; i < iter; i++) {
+        output += text;
+    } 
     return output;
 }
 
@@ -240,6 +276,92 @@ proto._dotop = function(root, item, args) {
 }
 
 proto.string_functions = {};
+
+// chunk(size)     negative size chunks from end 
+proto.string_functions.chunk = function(string, args) {
+    var size = args[0];
+    var list = new Array();
+    if (! size)
+        size = 1;
+    if (size < 0) {
+        size = 0 - size;
+        for (i = string.length - size; i >= 0; i = i - size)
+            list.unshift(string.substr(i, size));
+        if (string.length % size)
+            list.unshift(string.substr(0, string.length % size));
+    }
+    else
+        for (i = 0; i < string.length; i = i + size)
+            list.push(string.substr(i, size));
+    return list;
+}
+
+// defined         is value defined? 
+proto.string_functions.defined = function(string) {
+    return 1;
+}
+
+// hash            treat as single-element hash with key value 
+proto.string_functions.hash = function(string) {
+    return { 'value': string };
+}
+
+// length          length of string representation 
+proto.string_functions.length = function(string) {
+    return string.length;
+}
+
+// list            treat as single-item list 
+proto.string_functions.list = function(string) {
+    return [ string ];
+}
+
+// match(re)       get list of matches
+proto.string_functions.match = function(string, args) {
+    var regexp = new RegExp(args[0], 'gm');
+    var list = string.match(regexp);
+    return list;
+}
+
+// repeat(n)       repeated n times 
+proto.string_functions.repeat = function(string, args) {
+    var n = args[0] || 1;
+    var output = '';
+    for (var i = 0; i < n; i++) {
+        output += string;
+    }
+    return output;
+}
+
+// replace(re, sub)    replace instances of re with sub 
+proto.string_functions.replace = function(string, args) {
+    var regexp = new RegExp(args[0], 'gm');
+    var sub = args[1];
+    if (! sub)
+        sub  = '';
+    var output = string.replace(regexp, sub);
+    return output;
+}
+
+// search(re)      true if value matches re
+proto.string_functions.search = function(string, args) {
+    var regexp = new RegExp(args[0]);
+    return (string.search(regexp) >= 0) ? 1 : 0;
+}
+
+// size            returns 1, as if a single-item list 
+proto.string_functions.size = function(string) {
+    return 1;
+}
+
+// split(re)       split string on re 
+proto.string_functions.split = function(string, args) {
+    var regexp = new RegExp(args[0]);
+    var list = string.split(regexp);
+    return list;
+}
+
+
 
 proto.list_functions = {};
 
@@ -430,14 +552,21 @@ Ajax.post = function(url, data, callback) {
 }
 
 Ajax._send = function(req, data, callback) {
-    if (callback)
-        req.onreadystatechange = callback;
+    if (callback) {
+        req.onreadystatechange = function() {
+            if (req.readyState == 4) {
+                if(req.status == 200)
+                    callback(req.responseText);
+            }
+        };
+    }
     req.send(data);
-    if (callback)
-        return req;
-    if (req.status != 200)
-        throw('Request for "' + url + '" failed with status: ' + req.status);
-    return req.responseText;
+    if (!callback) {
+        if (req.status != 200)
+            throw('Request for "' + url +
+                  '" failed with status: ' + req.status);
+        return req.responseText;
+    }
 }
 
 //------------------------------------------------------------------------------

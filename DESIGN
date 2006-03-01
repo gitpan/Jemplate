@@ -142,17 +142,17 @@ completion, the second is for the testing of the feature.
 
 ==== Scalar variables 
 
-    -- chunk(size)     negative size chunks from end 
-    -- defined         is value defined? 
-    -- hash            treat as single-element hash with key value 
-    -- length          length of string representation 
-    -- list            treat as single-item list 
-    -- match(re)       true if value matches re 
-    -- repeat(n)       repeated n times 
-    -- replace(re, sub)    replace instances of re with sub 
-    -- search(re)      returns list of matching subpatterns 
-    -- size            returns 1, as if a single-item list 
-    -- split(re)       split string on re 
+    ++ chunk(size)     negative size chunks from end 
+    ++ defined         is value defined? 
+    ++ hash            treat as single-element hash with key value 
+    ++ length          length of string representation 
+    ++ list            treat as single-item list 
+    ++ match(re)       true if value matches re 
+    ++ repeat(n)       repeated n times 
+    ++ replace(re, sub)    replace instances of re with sub 
+    ++ search(re)      returns list of matching subpatterns 
+    ++ size            returns 1, as if a single-item list 
+    ++ split(re)       split string on re 
 
 ==== Hash variables 
 
@@ -204,15 +204,15 @@ completion, the second is for the testing of the feature.
     ++ lcfirst         lower case first character 
     ++ lower           convert to lower case 
     ++ null            output to the bit bucket 
-    -- perl(text)      evaluate text as Perl code 
-    -- redirect(file)  redirect output to file 
+    xx perl(text)      evaluate text as Perl code 
+    xx redirect(file)  redirect output to file 
     -- remove(re)      removes occurrences of re 
-    -- repeat(n)       repeat n times 
+    ++ repeat(n)       repeat n times 
     -- replace(re, sub)    replace re with sub 
-    -- stderr          redirect output to STDERR 
-    -- stdout(binmode)     redirect output to STDERR in mode binmode 
+    xx stderr          redirect output to STDERR 
+    xx stdout(binmode)     redirect output to STDERR in mode binmode 
     ++ trim            removes leading and trailing whitespace 
-    -- truncate(len)   truncate to length len 
+    ++ truncate(len)   truncate to length len 
     ++ ucfirst         capitalize first character 
     ++ upper           convert to upper case 
     ++ uri             performs URI-escaping 
