@@ -116,7 +116,7 @@ sub args {
     push(@$args, '{ ' . join(', ', @$hash) . ' }')
         if @$hash;
 
-    return '0' unless @$args;
+    return '[]' unless @$args;
     return '[ ' . join(', ', @$args) . ' ]';
 }
 
@@ -174,6 +174,21 @@ sub set {
     my $output;
     while (my ($var, $val) = splice(@$setlist, 0, 2)) {
         $output .= $class->assign($var, $val) . ";\n";
+    }
+    chomp $output;
+    return $output;
+}
+
+
+#------------------------------------------------------------------------
+# default(\@setlist)                   [% DEFAULT foo = bar, baz = qux %]
+#------------------------------------------------------------------------
+
+sub default {
+    my ($class, $setlist) = @_;
+    my $output;
+    while (my ($var, $val) = splice(@$setlist, 0, 2)) {
+        $output .= &assign($class, $var, $val, 1) . ";\n";
     }
     chomp $output;
     return $output;
@@ -530,6 +545,25 @@ sub macro {
 sub capture {
     return "throw('CAPTURE not yet supported in Jemplate');";
 }   
+
+BEGIN {
+    return;  # Comment out this line to get callback traces
+    no strict 'refs';
+    my $pkg = __PACKAGE__ . '::';
+    my $stash = \ %$pkg;
+    use strict 'refs';
+    for my $name (keys %$stash) {
+        my $glob = $stash->{$name};
+        if (*$glob{CODE}) {
+            my $code = *$glob{CODE};    
+            no warnings 'redefine';
+            $stash->{$name} = sub {
+                warn "Calling $name(@_)\n";
+                &$code(@_);
+            };
+        }
+    } 
+}
 
     
 1;

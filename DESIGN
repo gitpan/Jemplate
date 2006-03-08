@@ -103,7 +103,7 @@ completion, the second is for the testing of the feature.
     ++ [% [GET] var %]
     ++ [% CALL var %]
     ++ [% [SET] var = value ... %] 
-    -- [% DEFAULT var = value ... %] 
+    ++ [% DEFAULT var = value ... %] 
     -- [% META attr = value ... %] 
 
     -- [% INSERT filename %] 
@@ -156,16 +156,16 @@ completion, the second is for the testing of the feature.
 
 ==== Hash variables 
 
-    -- each            list of alternating keys/values 
-    -- exists(key)     does key exist? 
+    ++ each            list of alternating keys/values 
+    ++ exists(key)     does key exist? 
     -- import(hash2)   import contents of hash2 
     -- import          import into current namespace hash 
-    -- keys            list of keys 
-    -- list            returns alternating key, value 
-    -- nsort           keys sorted numerically 
-    -- size            number of pairs 
-    -- sort            keys sorted alphabetically 
-    -- values          list of values 
+    ++ keys            list of keys 
+    ++ list            returns alternating key, value 
+    ++ nsort           keys sorted numerically 
+    ++ size            number of pairs 
+    ++ sort            keys sorted alphabetically 
+    ++ values          list of values 
 
 ==== List variables 
 
@@ -208,7 +208,7 @@ completion, the second is for the testing of the feature.
     xx redirect(file)  redirect output to file 
     -- remove(re)      removes occurrences of re 
     ++ repeat(n)       repeat n times 
-    -- replace(re, sub)    replace re with sub 
+    ++ replace(re, sub)    replace re with sub 
     xx stderr          redirect output to STDERR 
     xx stdout(binmode)     redirect output to STDERR in mode binmode 
     ++ trim            removes leading and trailing whitespace 

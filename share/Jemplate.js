@@ -42,7 +42,7 @@ Jemplate.process = function(template, data, output) {
             output(result);
             return;
         }
-        if (output instanceof String) {
+        if (typeof(output) == 'string' || output instanceof String) {
             if (output.match(/^#[\w\-]+$/)) {
                 var id = output.replace(/^#/, '');
                 var element = document.getElementById(id);
@@ -81,16 +81,21 @@ if (typeof Jemplate.Context == 'undefined')
 proto = Jemplate.Context.prototype;
 
 proto.include = function(template, args) {
-    return this.process(template, args);
+    return this.process(template, args, true);
 }
 
-proto.process = function(template, args) {
-    if (typeof args != 'undefined')
-        this.stash.add(args);
+proto.process = function(template, args, localise) {
+    if (localise)
+        this.stash.clone(args);
+    else
+        this.stash.update(args);
     var func = Jemplate.templateMap[template];
     if (typeof func == 'undefined')
         throw('No Jemplate template named "' + template + '" available');
-    return func(this);
+    var output = func(this);
+    if (localise)
+        this.stash.declone();
+    return output;
 }
 
 proto.set_error = function(error, output) {
@@ -101,7 +106,7 @@ proto.set_error = function(error, output) {
 proto.filter = function(text, name, args) {
     if (name == 'null') 
         name = "null_filter";
-    if (typeof this._filter.filters[name] == "function") 
+    if (typeof this._filter.filters[name] == "function")
         return this._filter.filters[name](text, args, this);  
     else 
         throw "Unknown filter name ':" + name + "'";
@@ -154,7 +159,7 @@ proto.filters.html = function(text) {
     text = text.replace(/&/g, '&amp;'); 
     text = text.replace(/</g, '&lt;');
     text = text.replace(/>/g, '&gt;');
-    text = text.replace(/"/g, '&quot;');
+    text = text.replace(/"/g, '&quot;'); // " end quote for emacs
     return text;
 }
 
@@ -175,9 +180,10 @@ proto.filters.uri = function(text) {
     return encodeURI(text);
 }
 
-proto.filters.indent = function(text, pad) {
+proto.filters.indent = function(text, args) {
+    var pad = args[0];
     if (! text) return;
-    if (! pad) 
+    if (typeof pad == 'undefined') 
         pad = 4;
 
     var finalpad = '';
@@ -192,7 +198,8 @@ proto.filters.indent = function(text, pad) {
     return output;
 }
 
-proto.filters.truncate = function(text, len) {
+proto.filters.truncate = function(text, args) {
+    var len = args[0];
     if (! text) return;
     if (! len) 
         len = 32;
@@ -216,6 +223,18 @@ proto.filters.repeat = function(text, iter) {
     return output;
 }
 
+proto.filters.replace = function(text, args) {
+    if (! text) return;
+    var re_search = args[0];
+    var text_replace = args[1];
+    if (! re_search)
+        re_search = '';
+    if (! text_replace)
+        text_replace = '';
+    var re = new RegExp(re_search, 'g');
+    return text.replace(re, text_replace);
+}
+
 //------------------------------------------------------------------------------
 // Jemplate.Stash class
 //------------------------------------------------------------------------------
@@ -227,9 +246,22 @@ if (typeof Jemplate.Stash == 'undefined') {
 
 proto = Jemplate.Stash.prototype;
 
-proto.add = function(object) {
-    for (var key in object) {
-        var value = object[key];
+proto.clone = function(args) {
+    var data = this.data;
+    this.data = {};
+    this.update(data);
+    this.update(args);
+    this.data._PARENT = data;
+}
+
+proto.declone = function(args) {
+    this.data = this.data._PARENT || this.data;
+}
+
+proto.update = function(args) {
+    if (typeof args == 'undefined') return;
+    for (var key in args) {
+        var value = args[key];
         this.set(key, value);
     }
 }
@@ -254,13 +286,26 @@ proto.get = function(key) {
     return value;
 }
 
-proto.set = function(key, value) {
-    this.data[key] = value;
+proto.set = function(key, value, set_default) {
+    if (! (set_default && (typeof this.data[key] != 'undefined')))
+        this.data[key] = value;
 }
 
 proto._dotop = function(root, item, args) {
-    if (typeof item == 'undefined' || typeof item == 'string' && item.match(/^[\._]/))
+    if (typeof item == 'undefined' ||
+        typeof item == 'string' && item.match(/^[\._]/)) {
         return undefined;
+    }
+
+    if ((! args) &&
+        (typeof root == 'object') &&
+        (!(root instanceof Array) || (typeof item == 'number')) &&
+        (typeof root[item] != 'undefined')) {
+        var value = root[item];
+        if (typeof value == 'function')
+            value = value();
+        return value;
+    }
 
     if (typeof root == 'string' && this.string_functions[item])
         return this.string_functions[item](root, args);
@@ -268,11 +313,10 @@ proto._dotop = function(root, item, args) {
         return this.list_functions[item](root, args);
     if (typeof root == 'object' && this.hash_functions[item])
         return this.hash_functions[item](root, args);
+    if (typeof root[item] == 'function')
+        return root[item].apply(args);
 
-    var value = root[item];
-    if (typeof value == 'function')
-        value = value();
-    return value;
+    return undefined;
 }
 
 proto.string_functions = {};
@@ -475,6 +519,97 @@ proto.list_functions.last = function(list) {
 
 proto.hash_functions = {};
 
+
+// each            list of alternating keys/values 
+proto.hash_functions.each = function(hash) {
+    var list = new Array();
+    for ( var key in hash )
+        list.push(key, hash[key]);
+    return list;
+}
+
+// exists(key)     does key exist? 
+proto.hash_functions.exists = function(hash, args) {
+    return ( typeof( hash[args[0]] ) == "undefined" ) ? 0 : 1;
+}
+
+// FIXME proto.hash_functions.import blows everything up
+//
+// import(hash2)   import contents of hash2 
+// import          import into current namespace hash 
+//proto.hash_functions.import = function(hash, args) {
+//    var hash2 = args[0];
+//    for ( var key in hash2 )
+//        hash[key] = hash2[key];
+//    return '';
+//}
+
+// keys            list of keys 
+proto.hash_functions.keys = function(hash) {
+    var list = new Array();
+    for ( var key in hash )
+        list.push(key);
+    return list;
+}
+
+// list            returns alternating key, value 
+proto.hash_functions.list = function(hash, args) {
+    var what = '';
+    if ( args )
+        var what = args[0];
+        
+    var list = new Array();
+    if (what == 'keys')
+        for ( var key in hash )
+            list.push(key);
+    else if (what == 'values')
+        for ( var key in hash )
+            list.push(hash[key]);
+    else if (what == 'each')
+        for ( var key in hash )
+            list.push(key, hash[key]);
+    else
+        for ( var key in hash )
+            list.push({ 'key': key, 'value': hash[key] });
+
+    return list;
+}
+
+// nsort           keys sorted numerically 
+proto.hash_functions.nsort = function(hash) {
+    var list = new Array();
+    for (var key in hash)
+        list.push(key);
+    return list.sort(function(a, b) { return (a-b) });
+}
+
+// size            number of pairs 
+proto.hash_functions.size = function(hash) {
+    var size = 0;
+    for (var key in hash)
+        size++;
+    return size;
+}
+
+
+// sort            keys sorted alphabetically 
+proto.hash_functions.sort = function(hash) {
+    var list = new Array();
+    for (var key in hash)
+        list.push(key);
+    return list.sort();
+}
+
+// values          list of values 
+proto.hash_functions.values = function(hash) {
+    var list = new Array();
+    for ( var key in hash )
+        list.push(hash[key]);
+    return list;
+}
+
+
+
 //------------------------------------------------------------------------------
 // Jemplate.Iterator class
 //------------------------------------------------------------------------------
@@ -521,7 +656,6 @@ proto.get_next = function() {
 //------------------------------------------------------------------------------
 
 function XXX(msg) {
-    //if (! confirm(arguments.join('\n')))
     if (! confirm(msg))
         throw("terminated...");
 }
