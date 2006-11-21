@@ -1,4 +1,18 @@
 ---
+version: 0.19
+date:    Tue Nov 21 08:22:25 PST 2006
+changes:
+- Fixed setting a hash value. Reported by Theo Petersen. Thanks.
+- David added ability to compile path names by passing directory to recurse
+- Allow TT2 compile time options to be specified on command line.
+- Create runtime code from CLI script.
+- Allow Jemplate objects to be created with runtime configs.
+- Port some TT2 runtime options.
+- Better doc
+- --runtime command prints the runtime JavaScript module
+- --list lists the template names to be used
+
+---
 version: 0.18
 date:    Wed Mar  8 02:06:47 PST 2006
 changes:
@@ -13,7 +27,7 @@ changes:
   Jemplate test suite in kind.
 - gugod pulled over some uri escaping code from Kwiki
 - chansen tweaked the daemon to honor caching rules
-- Cory Bennett fixed some bug having to do with a Javascript String object.
+- Cory Bennett fixed some bug having to do with a JavaScript String object.
 - Cees fixed the defaults for the `indent` and `truncate` filters.
 - Stephen Howard reported that Jemplate was not localising the stash for
   the INCLUDE directive, and he even supplied a patch, but Ingy had
@@ -45,7 +59,7 @@ changes:
 - Ingy got tests working on Mozilla, IE, Safari and Opera
 - Ingy streamlined Makefiles and testing
 - Ingy refactored documentation
-- Cory Bennett JAVASCRIPT directive for inlining Javascript
+- Cory Bennett JAVASCRIPT directive for inlining JavaScript
 - Cory added -nojs flag to `jemplate` command line tool
 - Cory eliminated nasty eq/== hack
 - Cory added support for foo.0 numeric indexing
@@ -67,7 +81,7 @@ date:    Fri Feb 24 18:02:46 PST 2006
 changes:
 - Support SWITCH CASE and WRAPPER directives thanks to xantus and yann!
 - Now the Stash really works, thanks to Miyagawa!
-- Test.Base javascript runtime test framework!
+- Test.Base JavaScript runtime test framework!
 - Support all the TT array primitives in JS!
 
 ---

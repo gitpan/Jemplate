@@ -294,8 +294,8 @@ sub foreach {
             $loop_set;
 $block;
             retval = list.get_next();
-            var value = retval[0];
-            var done = retval[1];
+            value = retval[0];
+            done = retval[1];
         }
     }
     catch(e) {
@@ -314,7 +314,12 @@ EOF
 #------------------------------------------------------------------------
 
 sub next {
-    return "continue;";
+  return <<EOF;
+  retval = list.get_next();
+  value = retval[0];
+  done = retval[1];
+  continue;
+EOF
 }
 
 #------------------------------------------------------------------------
@@ -580,14 +585,14 @@ Jemplate::Directive - Jemplate Code Generating Backend
 
 Jemplate::Directive is the analog to Template::Directive, which is the
 module that produces that actual code that templates turn into. The
-Jemplate version obviously produces Javascript code rather than Perl.
+Jemplate version obviously produces JavaScript code rather than Perl.
 Other than that the two modules are almost exactly the same.
 
 =head1 BUGS
 
 Unfortunately, some of the code generation seems to happen before
 Jemplate::Directive gets control. So it currently has heuristical code
-to rejigger Perl code snippets into Javascript. This processing needs to
+to rejigger Perl code snippets into JavaScript. This processing needs to
 happen upstream once I get more clarity on how Template::Toolkit works.
 
 =head1 AUTHOR
