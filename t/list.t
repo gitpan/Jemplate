@@ -7,13 +7,13 @@ __DATA__
 --- command eval_stdout
 Jemplate->main('--list', 't/list/');
 --- output
-one
-three
-two
 bar/one
 bar/two
 foo/one
 foo/two
+one
+three
+two
 
 === Listing using files
 --- command eval_stdout
@@ -27,6 +27,6 @@ two
 Jemplate->main('--list', 't/list/foo', 't/list/three');
 --- output
 one
-two
 three
+two
 
