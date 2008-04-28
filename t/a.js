@@ -6,7 +6,7 @@ compiled Jemplate templates.
 
 AUTHOR - Ingy döt Net <ingy@cpan.org>
 
-Copyright 2006 Ingy döt Net. All Rights Reserved.
+Copyright 2006,2008 Ingy döt Net.
 
 This module is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself.
@@ -17,20 +17,22 @@ modify it under the same terms as Perl itself.
 //------------------------------------------------------------------------------
 
 if (typeof Jemplate == 'undefined') {
-    Jemplate = function() {
+    var Jemplate = function() {
         this.init.apply(this, arguments);
     };
 }
-
-if (! Jemplate.templateMap)
-    Jemplate.templateMap = {};
 
 Jemplate.process = function() {
     var jemplate = new Jemplate();
     return jemplate.process.apply(jemplate, arguments);
 }
 
-proto = Jemplate.prototype;
+;(function(){
+
+if (! Jemplate.templateMap)
+    Jemplate.templateMap = {};
+
+var proto = Jemplate.prototype = {};
 
 proto.init = function(config) {
     this.config = config ||
@@ -68,6 +70,9 @@ proto.process = function(template, data, output) {
     context.__filter__ = new Jemplate.Filter();
     context.__filter__.config = this.config;
 
+    context.__plugin__ = new Jemplate.Plugin();
+    context.__plugin__.config = this.config;
+
     var result;
 
     var proc = function(input) {
@@ -84,7 +89,7 @@ proto.process = function(template, data, output) {
             return result;
         if (typeof output == 'function') {
             output(result);
-            return;
+            return null;
         }
         if (typeof(output) == 'string' || output instanceof String) {
             if (output.match(/^#[\w\-]+$/)) {
@@ -93,12 +98,12 @@ proto.process = function(template, data, output) {
                 if (typeof element == 'undefined')
                     throw('No element found with id="' + id + '"');
                 element.innerHTML = result;
-                return;
+                return null;
             }
         }
         else {
             output.innerHTML = result;
-            return;
+            return null;
         }
 
         throw("Invalid arguments in call to Jemplate.process");
@@ -109,8 +114,10 @@ proto.process = function(template, data, output) {
     if (typeof data == 'function')
         data = data();
     else if (typeof data == 'string') {
-        Ajax.get(data, function(r) { proc(JSON.parse(r)) });
-        return;
+//        Jemplate.Ajax.get(data, function(r) { proc(Jemplate.JSON.parse(r)) });
+        var url = data;
+        Jemplate.Ajax.processGet(url, function(data) { proc(data) });
+        return null;
     }
 
     return proc(data);
@@ -147,6 +154,14 @@ proto.set_error = function(error, output) {
     return error;
 }
 
+proto.plugin = function(name, args) {
+    if (typeof name == 'undefined')
+        throw "Unknown plugin name ':" + name + "'";
+
+    // The Context object (this) is passed as the first argument to the plugin.
+    return new window[name](this, args);
+}
+
 proto.filter = function(text, name, args) {
     if (name == 'null')
         name = "null_filter";
@@ -155,6 +170,17 @@ proto.filter = function(text, name, args) {
     else
         throw "Unknown filter name ':" + name + "'";
 }
+
+//------------------------------------------------------------------------------
+// Jemplate.Plugin class
+//------------------------------------------------------------------------------
+if (typeof Jemplate.Plugin == 'undefined') {
+    Jemplate.Plugin = function() { };
+}
+
+proto = Jemplate.Plugin.prototype;
+
+proto.plugins = {};
 
 //------------------------------------------------------------------------------
 // Jemplate.Filter class
@@ -226,7 +252,7 @@ proto.filters.uri = function(text) {
 
 proto.filters.indent = function(text, args) {
     var pad = args[0];
-    if (! text) return;
+    if (! text) return null;
     if (typeof pad == 'undefined')
         pad = 4;
 
@@ -244,7 +270,7 @@ proto.filters.indent = function(text, args) {
 
 proto.filters.truncate = function(text, args) {
     var len = args[0];
-    if (! text) return;
+    if (! text) return null;
     if (! len)
         len = 32;
     // This should probably be <=, but TT just uses <
@@ -255,7 +281,7 @@ proto.filters.truncate = function(text, args) {
 }
 
 proto.filters.repeat = function(text, iter) {
-    if (! text) return;
+    if (! text) return null;
     if (! iter || iter == 0)
         iter = 1;
     if (iter == 1) return text
@@ -268,7 +294,7 @@ proto.filters.repeat = function(text, iter) {
 }
 
 proto.filters.replace = function(text, args) {
-    if (! text) return;
+    if (! text) return null;
     var re_search = args[0];
     var text_replace = args[1];
     if (! re_search)
@@ -359,7 +385,7 @@ proto._dotop = function(root, item, args) {
         (typeof root[item] != 'undefined')) {
         var value = root[item];
         if (typeof value == 'function')
-            value = value();
+            value = value.apply(root);
         return value;
     }
 
@@ -554,6 +580,7 @@ proto.list_functions.splice = function(list, args) {
         return list.splice(args[0], args[1]);
     if (args.length == 3)
         return list.splice(args[0], args[1], args[2]);
+    return null;
 }
 
 proto.list_functions.push = function(list, args) {
@@ -629,20 +656,21 @@ proto.hash_functions.keys = function(hash) {
 proto.hash_functions.list = function(hash, args) {
     var what = '';
     if ( args )
-        var what = args[0];
+        what = args[0];
 
     var list = new Array();
+    var key;
     if (what == 'keys')
-        for ( var key in hash )
+        for ( key in hash )
             list.push(key);
     else if (what == 'values')
-        for ( var key in hash )
+        for ( key in hash )
             list.push(hash[key]);
     else if (what == 'each')
-        for ( var key in hash )
+        for ( key in hash )
             list.push(key, hash[key]);
     else
-        for ( var key in hash )
+        for ( key in hash )
             list.push({ 'key': key, 'value': hash[key] });
 
     return list;
@@ -681,7 +709,11 @@ proto.hash_functions.values = function(hash) {
     return list;
 }
 
-
+//  delete
+proto.hash_functions.remove = function(hash, args) {
+    return delete hash[args[0]];
+}
+proto.hash_functions['delete'] = proto.hash_functions.remove;
 
 //------------------------------------------------------------------------------
 // Jemplate.Iterator class
@@ -747,63 +779,573 @@ proto.get_next = function(should_init) {
     return [null, true];
 }
 
-//------------------------------------------------------------------------------
-// Debugging Support
-//------------------------------------------------------------------------------
+var stubExplanation = "stub that doesn't do anything. Try including the jQuery, YUI, or XHR option when building the runtime";
 
-function XXX(msg) {
-    if (! confirm(msg))
-        throw("terminated...");
-    return msg;
-}
+Jemplate.Ajax = {
 
-function JJJ(obj) {
-    return XXX(JSON.stringify(obj));
-}
+    get: function(url, callback) {
+        throw("This is a Jemplate.Ajax.get " + stubExplanation);
+    },
 
-//------------------------------------------------------------------------------
-// Ajax support
-//------------------------------------------------------------------------------
-if (! this.Ajax) Ajax = {};
+    processGet: function(url, callback) {
+        throw("This is a Jemplate.Ajax.processGet " + stubExplanation);
+    },
 
-Ajax.get = function(url, callback) {
-    var req = new XMLHttpRequest();
-    req.open('GET', url, Boolean(callback));
-    return Ajax._send(req, null, callback);
-}
+    post: function(url, callback) {
+        throw("This is a Jemplate.Ajax.post " + stubExplanation);
+    }
 
-Ajax.post = function(url, data, callback) {
-    var req = new XMLHttpRequest();
-    req.open('POST', url, Boolean(callback));
-    req.setRequestHeader(
-        'Content-Type',
-        'application/x-www-form-urlencoded'
-    );
-    return Ajax._send(req, data, callback);
-}
+};
 
-Ajax._send = function(req, data, callback) {
-    if (callback) {
-        req.onreadystatechange = function() {
-            if (req.readyState == 4) {
-                if(req.status == 200)
-                    callback(req.responseText);
-            }
+Jemplate.JSON = {
+
+    parse: function(decodeValue) {
+        throw("This is a Jemplate.JSON.parse " + stubExplanation);
+    },
+
+    stringify: function(encodeValue) {
+        throw("This is a Jemplate.JSON.stringify " + stubExplanation);
+    }
+
+};
+
+}());
+
+;/*
+    json2.js
+    2008-03-24
+
+    Public Domain.
+
+    NO WARRANTY EXPRESSED OR IMPLIED. USE AT YOUR OWN RISK.
+
+    See http://www.JSON.org/js.html
+
+    This file creates a global JSON object containing three methods: stringify,
+    parse, and quote.
+
+
+        JSON.stringify(value, replacer, space)
+            value       any JavaScript value, usually an object or array.
+
+            replacer    an optional parameter that determines how object
+                        values are stringified for objects without a toJSON
+                        method. It can be a function or an array.
+
+            space       an optional parameter that specifies the indentation
+                        of nested structures. If it is omitted, the text will
+                        be packed without extra whitespace. If it is a number,
+                        it will specify the number of spaces to indent at each
+                        level. If it is a string (such as '\t'), it contains the
+                        characters used to indent at each level.
+
+            This method produces a JSON text from a JavaScript value.
+
+            When an object value is found, if the object contains a toJSON
+            method, its toJSON method with be called and the result will be
+            stringified. A toJSON method does not serialize: it returns the
+            value represented by the name/value pair that should be serialized,
+            or undefined if nothing should be serialized. The toJSON method will
+            be passed the key associated with the value, and this will be bound
+            to the object holding the key.
+
+            This is the toJSON method added to Dates:
+
+                function toJSON(key) {
+                    return this.getUTCFullYear()   + '-' +
+                         f(this.getUTCMonth() + 1) + '-' +
+                         f(this.getUTCDate())      + 'T' +
+                         f(this.getUTCHours())     + ':' +
+                         f(this.getUTCMinutes())   + ':' +
+                         f(this.getUTCSeconds())   + 'Z';
+                }
+
+            You can provide an optional replacer method. It will be passed the
+            key and value of each member, with this bound to the containing
+            object. The value that is returned from your method will be
+            serialized. If your method returns undefined, then the member will
+            be excluded from the serialization.
+
+            If no replacer parameter is provided, then a default replacer
+            will be used:
+
+                function replacer(key, value) {
+                    return Object.hasOwnProperty.call(this, key) ?
+                        value : undefined;
+                }
+
+            The default replacer is passed the key and value for each item in
+            the structure. It excludes inherited members.
+
+            If the replacer parameter is an array, then it will be used to
+            select the members to be serialized. It filters the results such
+            that only members with keys listed in the replacer array are
+            stringified.
+
+            Values that do not have JSON representaions, such as undefined or
+            functions, will not be serialized. Such values in objects will be
+            dropped; in arrays they will be replaced with null. You can use
+            a replacer function to replace those with JSON values.
+            JSON.stringify(undefined) returns undefined.
+
+            The optional space parameter produces a stringification of the value
+            that is filled with line breaks and indentation to make it easier to
+            read.
+
+            If the space parameter is a non-empty string, then that string will
+            be used for indentation. If the space parameter is a number, then
+            then indentation will be that many spaces.
+
+            Example:
+
+            text = JSON.stringify(['e', {pluribus: 'unum'}]);
+            // text is '["e",{"pluribus":"unum"}]'
+
+
+            text = JSON.stringify(['e', {pluribus: 'unum'}], null, '\t');
+            // text is '[\n\t"e",\n\t{\n\t\t"pluribus": "unum"\n\t}\n]'
+
+
+        JSON.parse(text, reviver)
+            This method parses a JSON text to produce an object or array.
+            It can throw a SyntaxError exception.
+
+            The optional reviver parameter is a function that can filter and
+            transform the results. It receives each of the keys and values, and
+            its return value is used instead of the original value. If it
+            returns what it received, then structure is not modified. If it
+            returns undefined then the member is deleted.
+
+            Example:
+
+            // Parse the text. Values that look like ISO date strings will
+            // be converted to Date objects.
+
+            myData = JSON.parse(text, function (key, value) {
+                var a;
+                if (typeof value === 'string') {
+                    a =
+/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2}(?:\.\d*)?)Z$/.exec(value);
+                    if (a) {
+                        return new Date(Date.UTC(+a[1], +a[2] - 1, +a[3], +a[4],
+                            +a[5], +a[6]));
+                    }
+                }
+                return value;
+            });
+
+
+        JSON.quote(text)
+            This method wraps a string in quotes, escaping some characters
+            as needed.
+
+
+    This is a reference implementation. You are free to copy, modify, or
+    redistribute.
+
+    USE YOUR OWN COPY. IT IS EXTREMELY UNWISE TO LOAD THIRD PARTY
+    CODE INTO YOUR PAGES.
+*/
+
+/*jslint regexp: true, forin: true, evil: true */
+
+/*global JSON */
+
+/*members "", "\b", "\t", "\n", "\f", "\r", "\"", JSON, "\\", apply,
+    call, charCodeAt, floor, getUTCDate, getUTCFullYear, getUTCHours,
+    getUTCMinutes, getUTCMonth, getUTCSeconds, hasOwnProperty, join, length,
+    parse, propertyIsEnumerable, prototype, push, quote, replace, stringify,
+    test, toJSON, toString
+*/
+
+if (!JSON) var JSON;
+if (!JSON) {
+
+// Create a JSON object only if one does not already exist. We create the
+// object in a closure to avoid global variables.
+
+    JSON = function () {
+
+        function f(n) {    // Format integers to have at least two digits.
+            return n < 10 ? '0' + n : n;
+        }
+
+        Date.prototype.toJSON = function () {
+
+// Eventually, this method will be based on the date.toISOString method.
+
+            return this.getUTCFullYear()   + '-' +
+                 f(this.getUTCMonth() + 1) + '-' +
+                 f(this.getUTCDate())      + 'T' +
+                 f(this.getUTCHours())     + ':' +
+                 f(this.getUTCMinutes())   + ':' +
+                 f(this.getUTCSeconds())   + 'Z';
         };
-    }
-    req.send(data);
-    if (!callback) {
-        if (req.status != 200)
-            throw('Request for "' + url +
-                  '" failed with status: ' + req.status);
-        return req.responseText;
-    }
+
+
+        var escapeable = /["\\\x00-\x1f\x7f-\x9f]/g,
+            gap,
+            indent,
+            meta = {    // table of character substitutions
+                '\b': '\\b',
+                '\t': '\\t',
+                '\n': '\\n',
+                '\f': '\\f',
+                '\r': '\\r',
+                '"' : '\\"',
+                '\\': '\\\\'
+            },
+            rep;
+
+
+        function quote(string) {
+
+// If the string contains no control characters, no quote characters, and no
+// backslash characters, then we can safely slap some quotes around it.
+// Otherwise we must also replace the offending characters with safe escape
+// sequences.
+
+            return escapeable.test(string) ?
+                '"' + string.replace(escapeable, function (a) {
+                    var c = meta[a];
+                    if (typeof c === 'string') {
+                        return c;
+                    }
+                    c = a.charCodeAt();
+                    return '\\u00' + Math.floor(c / 16).toString(16) +
+                                               (c % 16).toString(16);
+                }) + '"' :
+                '"' + string + '"';
+        }
+
+
+        function str(key, holder) {
+
+// Produce a string from holder[key].
+
+            var i,          // The loop counter.
+                k,          // The member key.
+                v,          // The member value.
+                length,
+                mind = gap,
+                partial,
+                value = holder[key];
+
+// If the value has a toJSON method, call it to obtain a replacement value.
+
+            if (value && typeof value === 'object' &&
+                    typeof value.toJSON === 'function') {
+                value = value.toJSON(key);
+            }
+
+// If we were called with a replacer function, then call the replacer to
+// obtain a replacement value.
+
+            if (typeof rep === 'function') {
+                value = rep.call(holder, key, value);
+            }
+
+// What happens next depends on the value's type.
+
+            switch (typeof value) {
+            case 'string':
+                return quote(value);
+
+            case 'number':
+
+// JSON numbers must be finite. Encode non-finite numbers as null.
+
+                return isFinite(value) ? String(value) : 'null';
+
+            case 'boolean':
+            case 'null':
+
+// If the value is a boolean or null, convert it to a string. Note:
+// typeof null does not produce 'null'. The case is included here in
+// the remote chance that this gets fixed someday.
+
+                return String(value);
+
+// If the type is 'object', we might be dealing with an object or an array or
+// null.
+
+            case 'object':
+
+// Due to a specification blunder in ECMAScript, typeof null is 'object',
+// so watch out for that case.
+
+                if (!value) {
+                    return 'null';
+                }
+
+// Make an array to hold the partial results of stringifying this object value.
+
+                gap += indent;
+                partial = [];
+
+// If the object has a dontEnum length property, we'll treat it as an array.
+
+                if (typeof value.length === 'number' &&
+                        !(value.propertyIsEnumerable('length'))) {
+
+// The object is an array. Stringify every element. Use null as a placeholder
+// for non-JSON values.
+
+                    length = value.length;
+                    for (i = 0; i < length; i += 1) {
+                        partial[i] = str(i, value) || 'null';
+                    }
+
+// Join all of the elements together, separated with commas, and wrap them in
+// brackets.
+
+                    v = partial.length === 0 ? '[]' :
+                        gap ? '[\n' + gap + partial.join(',\n' + gap) +
+                                  '\n' + mind + ']' :
+                              '[' + partial.join(',') + ']';
+                    gap = mind;
+                    return v;
+                }
+
+// If the replacer is an array, use it to select the members to be stringified.
+
+                if (typeof rep === 'object') {
+                    length = rep.length;
+                    for (i = 0; i < length; i += 1) {
+                        k = rep[i];
+                        if (typeof k === 'string') {
+                            v = str(k, value, rep);
+                            if (v) {
+                                partial.push(quote(k) + (gap ? ': ' : ':') + v);
+                            }
+                        }
+                    }
+                } else {
+
+// Otherwise, iterate through all of the keys in the object.
+
+                    for (k in value) {
+                        v = str(k, value, rep);
+                        if (v) {
+                            partial.push(quote(k) + (gap ? ': ' : ':') + v);
+                        }
+                    }
+                }
+
+// Join all of the member texts together, separated with commas,
+// and wrap them in braces.
+
+                v = partial.length === 0 ? '{}' :
+                    gap ? '{\n' + gap + partial.join(',\n' + gap) +
+                              '\n' + mind + '}' :
+                          '{' + partial.join(',') + '}';
+                gap = mind;
+                return v;
+            }
+
+            return null;
+        }
+
+
+// Return the JSON object containing the stringify, parse, and quote methods.
+
+        return {
+            stringify: function (value, replacer, space) {
+
+// The stringify method takes a value and an optional replacer, and an optional
+// space parameter, and returns a JSON text. The replacer can be a function
+// that can replace values, or an array of strings that will select the keys.
+// A default replacer method can be provided. Use of the space parameter can
+// produce text that is more easily readable.
+
+                var i;
+                gap = '';
+                indent = '';
+                if (space) {
+
+// If the space parameter is a number, make an indent string containing that
+// many spaces.
+
+                    if (typeof space === 'number') {
+                        for (i = 0; i < space; i += 1) {
+                            indent += ' ';
+                        }
+
+// If the space parameter is a string, it will be used as the indent string.
+
+                    } else if (typeof space === 'string') {
+                        indent = space;
+                    }
+                }
+
+// If there is no replacer parameter, use the default replacer.
+
+                if (!replacer) {
+                    rep = function (key, value) {
+                        if (!Object.hasOwnProperty.call(this, key)) {
+                            return undefined;
+                        }
+                        return value;
+                    };
+
+// The replacer can be a function or an array. Otherwise, throw an error.
+
+                } else if (typeof replacer === 'function' ||
+                        (typeof replacer === 'object' &&
+                         typeof replacer.length === 'number')) {
+                    rep = replacer;
+                } else {
+                    throw new Error('JSON.stringify');
+                }
+
+// Make a fake root object containing our value under the key of ''.
+// Return the result of stringifying the value.
+
+                return str('', {'': value});
+            },
+
+
+            parse: function (text, reviver) {
+
+// The parse method takes a text and an optional reviver function, and returns
+// a JavaScript value if the text is a valid JSON text.
+
+                var j;
+
+                function walk(holder, key) {
+
+// The walk method is used to recursively walk the resulting structure so
+// that modifications can be made.
+
+                    var k, v, value = holder[key];
+                    if (value && typeof value === 'object') {
+                        for (k in value) {
+                            if (Object.hasOwnProperty.call(value, k)) {
+                                v = walk(value, k);
+                                if (v !== undefined) {
+                                    value[k] = v;
+                                } else {
+                                    delete value[k];
+                                }
+                            }
+                        }
+                    }
+                    return reviver.call(holder, key, value);
+                }
+
+
+// Parsing happens in three stages. In the first stage, we run the text against
+// regular expressions that look for non-JSON patterns. We are especially
+// concerned with '()' and 'new' because they can cause invocation, and '='
+// because it can cause mutation. But just to be safe, we want to reject all
+// unexpected forms.
+
+// We split the first stage into 4 regexp operations in order to work around
+// crippling inefficiencies in IE's and Safari's regexp engines. First we
+// replace all backslash pairs with '@' (a non-JSON character). Second, we
+// replace all simple value tokens with ']' characters. Third, we delete all
+// open brackets that follow a colon or comma or that begin the text. Finally,
+// we look to see that the remaining characters are only whitespace or ']' or
+// ',' or ':' or '{' or '}'. If that is so, then the text is safe for eval.
+
+                if (/^[\],:{}\s]*$/.test(text.replace(/\\["\\\/bfnrtu]/g, '@').
+replace(/"[^"\\\n\r]*"|true|false|null|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g, ']').
+replace(/(?:^|:|,)(?:\s*\[)+/g, ''))) {
+
+// In the second stage we use the eval function to compile the text into a
+// JavaScript structure. The '{' operator is subject to a syntactic ambiguity
+// in JavaScript: it can begin a block or an object literal. We wrap the text
+// in parens to eliminate the ambiguity.
+
+                    j = eval('(' + text + ')');
+
+// In the optional third stage, we recursively walk the new structure, passing
+// each name/value pair to a reviver function for possible transformation.
+
+                    return typeof reviver === 'function' ?
+                        walk({'': j}, '') : j;
+                }
+
+// If the text is not JSON parseable, then a SyntaxError is thrown.
+
+                throw new SyntaxError('JSON.parse');
+            },
+
+            quote: quote
+        };
+    }();
 }
 
-//------------------------------------------------------------------------------
-// Cross-Browser XMLHttpRequest v1.1
-//------------------------------------------------------------------------------
-/*
+;;(function(){
+
+Jemplate.Ajax = {
+
+    get: function(url, callback) {
+        var request = new XMLHttpRequest();
+        request.open('GET', url, Boolean(callback));
+        request.setRequestHeader('Accept', 'text/json; text/x-json; application/json');
+        return this.request(request, null, callback);
+    },
+
+    processGet: function(url, processor) {
+        this.get(url, function(responseText){
+            process(Jemplate.JSON.parse(responseText));
+        });
+    },
+
+    post: function(url, data, callback) {
+        var request = new XMLHttpRequest();
+        request.open('POST', url, Boolean(callback));
+        request.setRequestHeader('Accept', 'text/json; text/x-json; application/json');
+        request.setRequestHeader(
+            'Content-Type', 'application/x-www-form-urlencoded'
+        );
+        return this.request(request, data, callback);
+    },
+
+    request: function(request, data, callback) {
+        if (callback) {
+            request.onreadystatechange = function() {
+                if (request.readyState == 4) {
+                    if(request.status == 200)
+                        callback(request.responseText);
+                }
+            };
+        }
+        request.send(data);
+        if (!callback) {
+            if (request.status != 200)
+                throw('Request for "' + url +
+                      '" failed with status: ' + request.status);
+            return request.responseText;
+        }
+        return null;
+    }
+};
+
+}());
+
+;;(function(){
+
+Jemplate.JSON = {
+
+    parse: function(encoded) {
+        return JSON.parse(encoded);
+    },
+
+    stringify: function(decoded) {
+        return JSON.stringify(decoded);
+    }
+
+};
+
+}());
+
+;/*
+
+Cross-Browser XMLHttpRequest v1.2
+=================================
+
 Emulate Gecko 'XMLHttpRequest()' functionality in IE and Opera. Opera requires
 the Sun Java Runtime Environment <http://www.java.com/>.
 
@@ -811,18 +1353,44 @@ by Andrew Gregory
 http://www.scss.com.au/family/andrew/webdesign/xmlhttprequest/
 
 This work is licensed under the Creative Commons Attribution License. To view a
-copy of this license, visit http://creativecommons.org/licenses/by/1.0/ or send
-a letter to Creative Commons, 559 Nathan Abbott Way, Stanford, California 94305,
-USA.
-*/
+copy of this license, visit http://creativecommons.org/licenses/by-sa/2.5/ or
+send a letter to Creative Commons, 559 Nathan Abbott Way, Stanford, California
+94305, USA.
 
+Attribution: Leave my name and web address in this script intact.
+
+Not Supported in Opera
+----------------------
+* user/password authentication
+* responseXML data member
+
+Not Fully Supported in Opera
+----------------------------
+* async requests
+* abort()
+* getAllResponseHeaders(), getAllResponseHeader(header)
+
+*/
 // IE support
 if (window.ActiveXObject && !window.XMLHttpRequest) {
   window.XMLHttpRequest = function() {
-    return new ActiveXObject((navigator.userAgent.toLowerCase().indexOf('msie 5') != -1) ? 'Microsoft.XMLHTTP' : 'Msxml2.XMLHTTP');
+    var msxmls = new Array(
+      'Msxml2.XMLHTTP.5.0',
+      'Msxml2.XMLHTTP.4.0',
+      'Msxml2.XMLHTTP.3.0',
+      'Msxml2.XMLHTTP',
+      'Microsoft.XMLHTTP');
+    for (var i = 0; i < msxmls.length; i++) {
+      try {
+        return new ActiveXObject(msxmls[i]);
+      } catch (e) {
+      }
+    }
+    return null;
   };
 }
-
+// Gecko support
+/* ;-) */
 // Opera support
 if (window.opera && !window.XMLHttpRequest) {
   window.XMLHttpRequest = function() {
@@ -832,6 +1400,24 @@ if (window.opera && !window.XMLHttpRequest) {
     this._headers = [];
     this._aborted = false;
     this._async = true;
+    this._defaultCharset = 'ISO-8859-1';
+    this._getCharset = function() {
+      var charset = _defaultCharset;
+      var contentType = this.getResponseHeader('Content-type').toUpperCase();
+      val = contentType.indexOf('CHARSET=');
+      if (val != -1) {
+        charset = contentType.substring(val);
+      }
+      val = charset.indexOf(';');
+      if (val != -1) {
+        charset = charset.substring(0, val);
+      }
+      val = charset.indexOf(',');
+      if (val != -1) {
+        charset = charset.substring(0, val);
+      }
+      return charset;
+    };
     this.abort = function() {
       this._aborted = true;
     };
@@ -847,6 +1433,14 @@ if (window.opera && !window.XMLHttpRequest) {
       }
       return ret;
     };
+    this.getResponseHeader = function(header) {
+      var ret = getAllResponseHeader(header);
+      var i = ret.indexOf('\n');
+      if (i != -1) {
+        ret = ret.substring(0, i);
+      }
+      return ret;
+    };
     this.setRequestHeader = function(header, value) {
       this._headers[this._headers.length] = {h:header, v:value};
     };
@@ -855,14 +1449,13 @@ if (window.opera && !window.XMLHttpRequest) {
       this.url = url;
       this._async = true;
       this._aborted = false;
+      this._headers = [];
       if (arguments.length >= 3) {
         this._async = async;
       }
       if (arguments.length > 3) {
-        // user/password support requires a custom Authenticator class
         opera.postError('XMLHttpRequest.open() - user/password not supported');
       }
-      this._headers = [];
       this.readyState = 1;
       if (this.onreadystatechange) {
         this.onreadystatechange();
@@ -901,7 +1494,7 @@ if (window.opera && !window.XMLHttpRequest) {
       if (this.method == 'POST') {
         // POST data
         conn.setDoOutput(true);
-        var wr = new java.io.OutputStreamWriter(conn.getOutputStream());
+        var wr = new java.io.OutputStreamWriter(conn.getOutputStream(), this._getCharset());
         wr.write(data);
         wr.flush();
         wr.close();
@@ -950,7 +1543,7 @@ if (window.opera && !window.XMLHttpRequest) {
       var reqdata = '';
       var stream = conn.getInputStream();
       if (stream) {
-        var reader = new java.io.BufferedReader(new java.io.InputStreamReader(stream));
+        var reader = new java.io.BufferedReader(new java.io.InputStreamReader(stream, this._getCharset()));
         var line;
         while ((line = reader.readLine()) != null) {
           if (this.readyState == 2) {
@@ -994,119 +1587,25 @@ if (!window.ActiveXObject && window.XMLHttpRequest) {
     switch (type.toLowerCase()) {
       case 'microsoft.xmlhttp':
       case 'msxml2.xmlhttp':
+      case 'msxml2.xmlhttp.3.0':
+      case 'msxml2.xmlhttp.4.0':
+      case 'msxml2.xmlhttp.5.0':
         return new XMLHttpRequest();
     }
     return null;
   };
 }
-
-
-//------------------------------------------------------------------------------
-// JSON Support
+;//------------------------------------------------------------------------------
+// Debugging Support
 //------------------------------------------------------------------------------
 
-/*
-Copyright (c) 2005 JSON.org
-*/
-var JSON = function () {
-    var m = {
-            '\b': '\\b',
-            '\t': '\\t',
-            '\n': '\\n',
-            '\f': '\\f',
-            '\r': '\\r',
-            '"' : '\\"',
-            '\\': '\\\\'
-        },
-        s = {
-            'boolean': function (x) {
-                return String(x);
-            },
-            number: function (x) {
-                return isFinite(x) ? String(x) : 'null';
-            },
-            string: function (x) {
-                if (/["\\\x00-\x1f]/.test(x)) {
-                    x = x.replace(/([\x00-\x1f\\"])/g, function(a, b) {
-                        var c = m[b];
-                        if (c) {
-                            return c;
-                        }
-                        c = b.charCodeAt();
-                        return '\\u00' +
-                            Math.floor(c / 16).toString(16) +
-                            (c % 16).toString(16);
-                    });
-                }
-                return '"' + x + '"';
-            },
-            object: function (x) {
-                if (x) {
-                    var a = [], b, f, i, l, v;
-                    if (x instanceof Array) {
-                        a[0] = '[';
-                        l = x.length;
-                        for (i = 0; i < l; i += 1) {
-                            v = x[i];
-                            f = s[typeof v];
-                            if (f) {
-                                v = f(v);
-                                if (typeof v == 'string') {
-                                    if (b) {
-                                        a[a.length] = ',';
-                                    }
-                                    a[a.length] = v;
-                                    b = true;
-                                }
-                            }
-                        }
-                        a[a.length] = ']';
-                    } else if (x instanceof Object) {
-                        a[0] = '{';
-                        for (i in x) {
-                            v = x[i];
-                            f = s[typeof v];
-                            if (f) {
-                                v = f(v);
-                                if (typeof v == 'string') {
-                                    if (b) {
-                                        a[a.length] = ',';
-                                    }
-                                    a.push(s.string(i), ':', v);
-                                    b = true;
-                                }
-                            }
-                        }
-                        a[a.length] = '}';
-                    } else {
-                        return;
-                    }
-                    return a.join('');
-                }
-                return 'null';
-            }
-        };
-    return {
-        copyright: '(c)2005 JSON.org',
-        license: 'http://www.crockford.com/JSON/license.html',
-        stringify: function (v) {
-            var f = s[typeof v];
-            if (f) {
-                v = f(v);
-                if (typeof v == 'string') {
-                    return v;
-                }
-            }
-            return null;
-        },
-        parse: function (text) {
-            try {
-                return !(/[^,:{}\[\]0-9.\-+Eaeflnr-u \n\r\t]/.test(
-                        text.replace(/"(\\.|[^"\\])*"/g, ''))) &&
-                    eval('(' + text + ')');
-            } catch (e) {
-                return false;
-            }
-        }
-    };
-}();
+function XXX(msg) {
+    if (! confirm(msg))
+        throw("terminated...");
+    return msg;
+}
+
+function JJJ(obj) {
+    return XXX(JSON.stringify(obj));
+}
+
