@@ -29,6 +29,8 @@ if (typeof Jemplate == 'undefined') {
     };
 }
 
+Jemplate.VERSION = '0.22';
+
 Jemplate.process = function() {
     var jemplate = new Jemplate();
     return jemplate.process.apply(jemplate, arguments);
@@ -862,7 +864,7 @@ Jemplate.Ajax = {
 
     processGet: function(url, processor) {
         this.get(url, function(responseText){
-            process(Jemplate.JSON.parse(responseText));
+            processor(Jemplate.JSON.parse(responseText));
         });
     },
 
@@ -916,7 +918,7 @@ Jemplate.Ajax = {
 
     processGet: function(url, processor) {
         this.get(url, function(responseText){
-            process(YAHOO.lang.JSON.parse(responseText));
+            processor(YAHOO.lang.JSON.parse(responseText));
         });
     },
 
@@ -2498,6 +2500,8 @@ sub xhr_ilinsky {
 	// Register new object with window
 	window.XMLHttpRequest	= cXMLHttpRequest;
 })();
+
+
 ...
 }
 

@@ -5,7 +5,7 @@ use warnings;
 use Template 2.14;
 use Getopt::Long;
 
-our $VERSION = '0.21';
+our $VERSION = '0.22';
 
 use Jemplate::Parser;
 
@@ -393,8 +393,6 @@ if (typeof(Jemplate) == 'undefined')
 }
 
 1;
-
-=encoding utf8
 
 =head1 NAME
 
