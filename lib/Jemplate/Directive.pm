@@ -12,7 +12,7 @@ our $INJAVASCRIPT = 0;
 sub template {
     my ($class, $block) = @_;
 
-    return "sub { return '' }" unless $block =~ /\S/;
+    return "function() { return ''; }" unless $block =~ /\S/;
 
     return <<"...";
 function(context) {
@@ -529,6 +529,24 @@ sub use {
 
 
 #------------------------------------------------------------------------
+# raw(\@lnameargs)                         [% RAW alias = plugin(args) %]
+#     # => [ [$file, ...], \@args, $alias ]
+#------------------------------------------------------------------------
+
+sub raw {
+    my ($class, $lnameargs) = @_;
+    my ($file, $args, $alias) = @$lnameargs;
+    $file = shift @$file;       # same production rule as INCLUDE
+    $alias ||= $file;
+    $args = &args($class, $args);
+#    $file .= ", $args" if $args;
+    $file =~ s/'|"//g;
+    return "// RAW\n"
+         . "stash.set($alias, $file);";
+}
+
+
+#------------------------------------------------------------------------
 # stubs()                                                      [% STOP %]
 #------------------------------------------------------------------------
 
@@ -561,9 +579,77 @@ sub quoted {
     return "throw('QUOTED called with unknown arguments in Jemplate');";
 }   
 
+#------------------------------------------------------------------------
+# macro($name, $block, \@args)
+#------------------------------------------------------------------------
+
 sub macro {
-    return "throw('MACRO not yet supported in Jemplate');";
-}   
+    my ($class, $ident, $block, $args) = @_;
+
+    if ($args) {
+        $args = join(';', map { "args['$_'] = fargs.shift()" } @$args);
+
+        return <<EOF;
+
+//MACRO
+stash.set('$ident', function () {
+    var output = '';
+    var args = {};
+    var fargs = Array.prototype.slice.call(arguments);
+    $args;
+    args.arguments = Array.prototype.slice.call(arguments);
+
+    var params = fargs.shift() || {};
+
+    for (var key in params) {
+        args[key] = params[key];
+    }
+
+    context.stash.clone(args);
+    try {
+$block
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    context.stash.declone();
+    return output;
+});
+
+EOF
+
+    }
+    else {
+        return <<EOF;
+
+//MACRO
+
+stash.set('$ident', function () {
+    var output = '';
+    var args = {};
+    
+    var fargs = Array.prototype.slice.call(arguments);
+    args.arguments = Array.prototype.slice.call(arguments);   
+    
+    if (typeof arguments[0] == 'object') args = arguments[0];
+    
+    context.stash.clone(args);
+    try {
+$block
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    context.stash.declone(); 
+    return output;});
+
+EOF
+    }
+}
 
 sub capture {
     return "throw('CAPTURE not yet supported in Jemplate');";

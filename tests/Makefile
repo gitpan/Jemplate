@@ -1,16 +1,40 @@
-.PHONY: deps run-files
+.PHONY: all clean purge jemplate
 
-INGY_JSAN_CODE=../../../ingy/jsan
+T_JS := $(wildcard t/*t.js)
+T_HTML := $(T_JS:t/%.t.js=%.t.html)
 
-all: run-files
+ALL_TARGETS=$(T_HTML) \
+	    index.html \
+	    js/JemplateRuntime.js \
+	    js/jemplate.js \
+	    js/jemplate2.js \
 
-deps: run
-	cp -r $(INGY_JSAN_CODE)/Test-Base/sample/run/lib/ run/lib/
-	cp -r $(INGY_JSAN_CODE)/Test-Base/sample/run/bin/ run/bin/
-	cp -r $(INGY_JSAN_CODE)/Test-Base/sample/run/template/ run/template/
+JEMPLATES=t/*.t.js
+JEMPLATE := perl -I../lib ../jemplate
 
-run:
-	mkdir $@
+all: $(ALL_TARGETS)
 
-run-files:
-	make -C run clean all
+%.t.html: template/test.html
+	perl bin/render-template test.html $@
+
+index.html: template/index.html $(JEMPLATES)
+	perl bin/render-template index.html $@
+
+js/JemplateRuntime.js:
+	$(JEMPLATE) --runtime=standard > $@
+
+js/jemplate.js: jemplate $(JEMPLATES)
+	$(JEMPLATE) --compile jemplate/* > $@
+
+js/jemplate2.js: jemplate2
+	$(JEMPLATE) --compile jemplate2 \
+		--start-tag='<!' --end-tag='!>' --any-case --post-chomp > $@
+
+jemplate: $(JEMPLATES)
+	perl bin/pull-jemplates
+
+clean purge:
+	rm -fr $(ALL_TARGETS) jemplate/* *.t.js
+
+html:
+	mkdir html

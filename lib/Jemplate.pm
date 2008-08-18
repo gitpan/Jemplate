@@ -5,7 +5,7 @@ use warnings;
 use Template 2.14;
 use Getopt::Long;
 
-our $VERSION = '0.23';
+our $VERSION = '0.23_1';
 
 use Jemplate::Parser;
 
@@ -77,7 +77,7 @@ sub main {
     my ($runtime, $compile, $list) = @$jemplate_options{qw/runtime compile list/};
 
     if ($runtime) {
-        runtime_source_code(@$jemplate_options{qw/runtime ajax json xhr xxx compact/});
+        print runtime_source_code(@$jemplate_options{qw/runtime ajax json xhr xxx compact/});
         return unless $compile;
     }
 
@@ -262,6 +262,8 @@ sub runtime_source_code {
     require Jemplate::Runtime;
     require Jemplate::Runtime::Compact;
 
+    unshift @_, "standard" unless @_;
+
     my ($runtime, $ajax, $json, $xhr, $xxx, $compact) = map { defined $_ ? lc $_ : "" } @_[0 .. 5];
 
     my $Jemplate_Runtime = $compact ? "Jemplate::Runtime::Compact" : "Jemplate::Runtime";
@@ -311,7 +313,7 @@ sub runtime_source_code {
 
     push @runtime, $Jemplate_Runtime->xxx if $xxx;
 
-    print join ";", @runtime;
+    return join ";", @runtime;
 }
 
 #-------------------------------------------------------------------------------
@@ -383,7 +385,7 @@ sub _preamble {
    Template Toolkit. Any changes made to this file will be lost the next
    time the templates are compiled.
 
-   Copyright 2006 - Ingy döt Net - All rights reserved.
+   Copyright 2006-2008 - Ingy döt Net - All rights reserved.
 */
 
 if (typeof(Jemplate) == 'undefined')
