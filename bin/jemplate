@@ -182,15 +182,13 @@ BEGIN {
 
 package File::Find::Rule;
 use strict;
-use vars qw/$VERSION $AUTOLOAD/;
 use File::Spec;
 use Text::Glob 'glob_to_regex';
 use Number::Compare;
 use Carp qw/croak/;
 use File::Find (); # we're only wrapping for now
-use Cwd;           # 5.00503s File::Find goes screwy with max_depth == 0
 
-$VERSION = '0.30';
+our $VERSION = '0.32';
 
 sub import {
     my $pkg = shift;
@@ -245,8 +243,8 @@ sub new {
     my $referent = shift;
     my $class = ref $referent || $referent;
     bless {
-        rules    => [],  # [0]
-        subs     => [],  # [1]
+        rules    => [],
+        subs     => {},
         iterator => [],
         extras   => {},
         maxdepth => undef,
@@ -349,15 +347,15 @@ use vars qw( @stat_tests );
 
 sub any {
     my $self = _force_object shift;
-    my @rulesets = @_;
-
+    # compile all the subrules to code fragments
     push @{ $self->{rules} }, {
-        rule => 'any',
-        code => '(' . join( ' || ', map {
-            "( " . $_->_compile( $self->{subs} ) . " )"
-        } @_ ) . ")",
+        rule => "any",
+        code => '(' . join( ' || ', map '( ' . $_->_compile . ' )', @_ ). ')',
         args => \@_,
     };
+    
+    # merge all the subs hashes of the kids into ourself
+    %{ $self->{subs} } = map { %{ $_->{subs} } } $self, @_;
     $self;
 }
 
@@ -366,15 +364,15 @@ sub any {
 
 sub not {
     my $self = _force_object shift;
-    my @rulesets = @_;
 
     push @{ $self->{rules} }, {
         rule => 'not',
-        args => \@rulesets,
-        code => '(' . join ( ' && ', map {
-            "!(". $_->_compile( $self->{subs} ) . ")"
-        } @_ ) . ")",
+        args => \@_,
+        code => '(' . join ( ' && ', map { "!(". $_->_compile . ")" } @_ ) . ")",
     };
+    
+    # merge all the subs hashes into us
+    %{ $self->{subs} } = map { %{ $_->{subs} } } $self, @_;
     $self;
 }
 
@@ -465,6 +463,7 @@ sub relative () {
 
 sub DESTROY {}
 sub AUTOLOAD {
+    our $AUTOLOAD;
     $AUTOLOAD =~ /::not_([^:]*)$/
       or croak "Can't locate method $AUTOLOAD";
     my $method = $1;
@@ -485,8 +484,8 @@ sub in {
     my $self = _force_object shift;
 
     my @found;
-    my $fragment = $self->_compile( $self->{subs} );
-    my @subs = @{ $self->{subs} };
+    my $fragment = $self->_compile;
+    my %subs = %{ $self->{subs} };
 
     warn "relative mode handed multiple paths - that's a bit silly\n"
       if $self->{relative} && @_ > 1;
@@ -526,11 +525,10 @@ sub in {
     }';
 
     #use Data::Dumper;
-    #print Dumper \@subs;
+    #print Dumper \%subs;
     #warn "Compiled sub: '$code'\n";
 
     my $sub = eval "$code" or die "compile error '$code' $@";
-    my $cwd = getcwd;
     for my $path (@_) {
         # $topdir is used for relative and maxdepth
         $topdir = $path;
@@ -540,7 +538,6 @@ sub in {
           unless $topdir eq '/';
         $self->_call_find( { %{ $self->{extras} }, wanted => $sub }, $path );
     }
-    chdir $cwd;
 
     return @found;
 }
@@ -552,19 +549,20 @@ sub _call_find {
 
 sub _compile {
     my $self = shift;
-    my $subs = shift; # [1]
 
     return '1' unless @{ $self->{rules} };
     my $code = join " && ", map {
         if (ref $_->{code}) {
-            push @$subs, $_->{code};
-            "\$subs[$#{$subs}]->(\@args) # $_->{rule}\n";
+            my $key = "$_->{code}";
+            $self->{subs}{$key} = $_->{code};
+            "\$subs{'$key'}->(\@args) # $_->{rule}\n";
         }
         else {
             "( $_->{code} ) # $_->{rule}\n";
         }
     } @{ $self->{rules} };
 
+    #warn $code;
     return $code;
 }
 
@@ -597,15 +595,14 @@ BEGIN {
 package Template::Constants;
 
 require Exporter;
-
 use strict;
 use warnings;
-use base 'Exporter';
-
+use Exporter;
 use vars qw( @EXPORT_OK %EXPORT_TAGS );
-use vars qw( $DEBUG_OPTIONS @STATUS @ERROR @CHOMP @DEBUG);
+use vars qw( $DEBUG_OPTIONS @STATUS @ERROR @CHOMP @DEBUG @ISA );
+@ISA = qw( Exporter );
 
-our $VERSION = 2.74;
+our $VERSION = 2.75;
 
 
 
@@ -739,7 +736,7 @@ use strict;
 use warnings;
 use Template::Constants;
 
-our $VERSION = 2.77;
+our $VERSION = 2.78;
 
 
 
@@ -747,7 +744,8 @@ sub new {
     my $class = shift;
     my ($argnames, @args, $arg, $cfg);
 
-    {	no strict qw( refs );
+    {   no strict 'refs';
+        no warnings 'once';
         $argnames = \@{"$class\::BASEARGS"} || [ ];
     }
 
@@ -759,10 +757,10 @@ sub new {
     }
 
     # fold all remaining args into a hash, or use provided hash ref
-    $cfg  = defined $_[0] && UNIVERSAL::isa($_[0], 'HASH') ? shift : { @_ };
+    $cfg  = defined $_[0] && ref($_[0]) eq 'HASH' ? shift : { @_ };
 
     my $self = bless {
-        map { ($_ => shift @args) } @$argnames,
+        (map { ($_ => shift @args) } @$argnames),
         _ERROR  => '',
         DEBUG   => 0,
     }, $class;
@@ -796,11 +794,6 @@ sub _init {
     return $self;
 }
 
-
-sub DEBUG {
-    my $self = shift;
-    print STDERR "DEBUG: ", @_;
-}
 
 sub debug {
     my $self = shift;
@@ -847,7 +840,7 @@ use vars qw( $VERSION $DEBUG $ERROR $INSTDIR
              $LATEX_PATH $PDFLATEX_PATH $DVIPS_PATH
              $STASH $SERVICE $CONTEXT $CONSTANTS @PRELOAD );
 
-$VERSION   = 2.74;
+$VERSION   = 2.75;
 $DEBUG     = 0 unless defined $DEBUG;
 $ERROR     = '';
 $CONTEXT   = 'Template::Context';
@@ -883,9 +876,7 @@ sub load {
     my ($class, $module) = @_;
     $module =~ s[::][/]g;
     $module .= '.pm';
-    eval {
-	require $module;
-    };
+    eval { require $module; };
     return $@ ? $class->error("failed to load $module: $@") : 1;
 }
 
@@ -893,20 +884,20 @@ sub load {
 
 sub parser {
     my $class  = shift;
-    my $params = defined($_[0]) && UNIVERSAL::isa($_[0], 'HASH')
-	       ? shift : { @_ };
+    my $params = defined($_[0]) && ref($_[0]) eq 'HASH'
+               ? shift : { @_ };
 
     return undef unless $class->load($PARSER);
     return $PARSER->new($params) 
-	|| $class->error("failed to create parser: ", $PARSER->error);
+        || $class->error("failed to create parser: ", $PARSER->error);
 }
 
 
 
 sub provider {
     my $class  = shift;
-    my $params = defined($_[0]) && UNIVERSAL::isa($_[0], 'HASH') 
-	       ? shift : { @_ };
+    my $params = defined($_[0]) && ref($_[0]) eq 'HASH' 
+               ? shift : { @_ };
 
     return undef unless $class->load($PROVIDER);
     return $PROVIDER->new($params) 
@@ -918,26 +909,26 @@ sub provider {
 
 sub plugins {
     my $class  = shift;
-    my $params = defined($_[0]) && UNIVERSAL::isa($_[0], 'HASH') 
-	       ? shift : { @_ };
+    my $params = defined($_[0]) && ref($_[0]) eq 'HASH' 
+               ? shift : { @_ };
 
     return undef unless $class->load($PLUGINS);
     return $PLUGINS->new($params)
-	|| $class->error("failed to create plugin provider: ",
-			 $PLUGINS->error);
+        || $class->error("failed to create plugin provider: ",
+                         $PLUGINS->error);
 }
 
 
 
 sub filters {
     my $class  = shift;
-    my $params = defined($_[0]) && UNIVERSAL::isa($_[0], 'HASH') 
-	       ? shift : { @_ };
+    my $params = defined($_[0]) && ref($_[0]) eq 'HASH' 
+               ? shift : { @_ };
 
     return undef unless $class->load($FILTERS);
     return $FILTERS->new($params)
-	|| $class->error("failed to create filter provider: ",
-			 $FILTERS->error);
+        || $class->error("failed to create filter provider: ",
+                         $FILTERS->error);
 }
 
 
@@ -948,56 +939,56 @@ sub iterator {
 
     return undef unless $class->load($ITERATOR);
     return $ITERATOR->new($list, @_)
-	|| $class->error("failed to create iterator: ", $ITERATOR->error);
+        || $class->error("failed to create iterator: ", $ITERATOR->error);
 }
 
 
 
 sub stash {
     my $class  = shift;
-    my $params = defined($_[0]) && UNIVERSAL::isa($_[0], 'HASH') 
-	       ? shift : { @_ };
+    my $params = defined($_[0]) && ref($_[0]) eq 'HASH' 
+               ? shift : { @_ };
 
     return undef unless $class->load($STASH);
     return $STASH->new($params) 
-	|| $class->error("failed to create stash: ", $STASH->error);
+        || $class->error("failed to create stash: ", $STASH->error);
 }
 
 
 
 sub context {
     my $class  = shift;
-    my $params = defined($_[0]) && UNIVERSAL::isa($_[0], 'HASH') 
-	       ? shift : { @_ };
+    my $params = defined($_[0]) && ref($_[0]) eq 'HASH' 
+               ? shift : { @_ };
 
     return undef unless $class->load($CONTEXT);
     return $CONTEXT->new($params) 
-	|| $class->error("failed to create context: ", $CONTEXT->error);
+        || $class->error("failed to create context: ", $CONTEXT->error);
 }
 
 
 
 sub service {
     my $class  = shift;
-    my $params = defined($_[0]) && UNIVERSAL::isa($_[0], 'HASH') 
-	       ? shift : { @_ };
+    my $params = defined($_[0]) && ref($_[0]) eq 'HASH' 
+               ? shift : { @_ };
 
     return undef unless $class->load($SERVICE);
     return $SERVICE->new($params) 
-	|| $class->error("failed to create context: ", $SERVICE->error);
+        || $class->error("failed to create context: ", $SERVICE->error);
 }
 
 
 
 sub constants {
     my $class  = shift;
-    my $params = defined($_[0]) && UNIVERSAL::isa($_[0], 'HASH') 
-	       ? shift : { @_ };
+    my $params = defined($_[0]) && ref($_[0]) eq 'HASH' 
+               ? shift : { @_ };
 
     return undef unless $class->load($CONSTANTS);
     return $CONSTANTS->new($params) 
-	|| $class->error("failed to create constants namespace: ", 
-			 $CONSTANTS->error);
+        || $class->error("failed to create constants namespace: ", 
+                         $CONSTANTS->error);
 }
 
 
@@ -1005,7 +996,7 @@ sub constants {
 sub instdir {
     my ($class, $dir) = @_;
     my $inst = $INSTDIR 
-	|| return $class->error("no installation directory");
+        || return $class->error("no installation directory");
     $inst =~ s[/$][]g;
     $inst .= "/$dir" if $dir;
     return $inst;
@@ -1143,7 +1134,7 @@ sub process {
 
     die $context->catch($@)
         if $@;
-	
+        
     return $output;
 }
 
@@ -1170,9 +1161,9 @@ sub _dump {
     $output .= "BLOCK: $self->{ _BLOCK }\nDEFBLOCKS:\n";
 
     if ($dblks = $self->{ _DEFBLOCKS }) {
-	foreach my $b (keys %$dblks) {
-	    $output .= "    $b: $dblks->{ $b }\n";
-	}
+        foreach my $b (keys %$dblks) {
+            $output .= "    $b: $dblks->{ $b }\n";
+        }
     }
 
     return $output;
@@ -1185,12 +1176,12 @@ sub as_perl {
     my ($class, $content) = @_;
     my ($block, $defblocks, $metadata) = @$content{ qw( BLOCK DEFBLOCKS METADATA ) };
 
-    $block =~ s/\n/\n    /g;
+    $block =~ s/\n(?!#line)/\n    /g;
     $block =~ s/\s+$//;
 
     $defblocks = join('', map {
         my $code = $defblocks->{ $_ };
-        $code =~ s/\n/\n        /g;
+        $code =~ s/\n(?!#line)/\n        /g;
         $code =~ s/\s*$//;
         "        '$_' => $code,\n";
     } keys %$defblocks);
@@ -1224,7 +1215,7 @@ sub write_perl_file {
     my ($fh, $tmpfile);
     
     return $class->error("invalid filename: $file")
-	unless $file =~ /^(.+)$/s;
+        unless $file =~ /^(.+)$/s;
 
     eval {
         require File::Temp;
@@ -1273,7 +1264,7 @@ use constant INFO  => 1;
 use constant TEXT  => 2;
 use overload q|""| => "as_string", fallback => 1;
 
-our $VERSION = 2.69;
+our $VERSION = 2.70;
 
 
 
@@ -1303,16 +1294,15 @@ sub text {
     my $textref = $self->[ TEXT ];
     
     if ($newtextref) {
-	$$newtextref .= $$textref if $textref && $textref ne $newtextref;
-	$self->[ TEXT ] = $newtextref;
-	return '';
-	
+        $$newtextref .= $$textref if $textref && $textref ne $newtextref;
+        $self->[ TEXT ] = $newtextref;
+        return '';
     }
     elsif ($textref) {
-	return $$textref;
+        return $$textref;
     }
     else {
-	return '';
+        return '';
     }
 }
 
@@ -1332,11 +1322,11 @@ sub select_handler {
     @hlut{ @options } = (1) x @options;
 
     while ($type) {
-	return $type if $hlut{ $type };
+        return $type if $hlut{ $type };
 
-	# strip .element from the end of the exception type to find a 
-	# more generic handler
-	$type =~ s/\.?[^\.]*$//;
+        # strip .element from the end of the exception type to find a 
+        # more generic handler
+        $type =~ s/\.?[^\.]*$//;
     }
     return undef;
 }
@@ -1360,6 +1350,9 @@ use base 'Template::Base';
 use Template::Config;
 use Template::Exception;
 use Template::Constants;
+use Scalar::Util 'blessed';
+
+use constant EXCEPTION => 'Template::Exception';
 
 our $VERSION = 2.80;
 our $DEBUG   = 0 unless defined $DEBUG;
@@ -1390,6 +1383,7 @@ sub process {
     # localise the variable stash with any parameters passed
     # and set the 'template' variable
     $params ||= { };
+    # TODO: change this to C<||=> so we can use a template parameter
     $params->{ template } = $template 
         unless ref $template eq 'CODE';
     $context->localise($params);
@@ -1500,7 +1494,7 @@ sub _recover {
     # point... unless a module like CGI::Carp messes around with the 
     # DIE handler. 
     return undef
-        unless UNIVERSAL::isa($$error, 'Template::Exception');
+        unless blessed($$error) && $$error->isa(EXCEPTION);
 
     # a 'stop' exception is thrown by [% STOP %] - we return the output
     # buffer stored in the exception object
@@ -1602,7 +1596,7 @@ use constant LOAD   => 3;   # mtime of template
 use constant NEXT   => 4;   # link to next item in cache linked list
 use constant STAT   => 5;   # Time last stat()ed
 
-our $VERSION = 2.93;
+our $VERSION = 2.94;
 our $DEBUG   = 0 unless defined $DEBUG;
 our $ERROR   = '';
 
@@ -1711,7 +1705,7 @@ sub load {
               || return ($self->error(), Template::Constants::STATUS_ERROR);
 
           foreach my $dir (@$paths) {
-              $path = "$dir/$name";
+              $path = File::Spec->catfile($dir, $name);
               last INCPATH
                   if $self->_template_modified($path);
           }
@@ -1768,7 +1762,7 @@ sub paths {
             unshift(@ipaths, @$dpaths);
             next;
         }
-        elsif (UNIVERSAL::can($dir, 'paths')) {
+        elsif (ref($dir) && UNIVERSAL::can($dir, 'paths')) {
             $dpaths = $dir->paths()
                 || return $self->error($dir->error());
             unshift(@ipaths, @$dpaths);
@@ -1852,8 +1846,8 @@ sub _init {
             my $wdir = $dir;
             $wdir =~ s[:][]g if $^O eq 'MSWin32';
             $wdir =~ /(.*)/;  # untaint
-            $wdir = $1;
-            $wdir = File::Spec->catfile($cdir, $1);
+            $wdir = "$1";     # quotes work around bug in Strawberry Perl
+            $wdir = File::Spec->catfile($cdir, $wdir);
             File::Path::mkpath($wdir) unless -d $wdir;
         }
     }
@@ -1927,19 +1921,26 @@ sub _fetch {
         warn($self->error(), "\n");
     }
 
-    # Now fetch template from source, compile, and cache.
+    # load template from source
     my ($template, $error) = $self->_load($name, $t_name);
-    unless ($error) {
-        ($template, $error) = $self->_compile($template, $self->_compiled_filename($name) );
 
-        # Store compiled template and return it
-        return $self->store( $name, $template->{data} ) unless $error;
+    if ($error) {
+        # Template could not be fetched.  Add to the negative/notfound cache.
+        $self->{ NOTFOUND }->{ $name } = time;
+        return ( $template, $error );
     }
 
-    # Template could not be fetched.  Add to the negative/notfound cache.
-    $self->{ NOTFOUND }->{ $name } = time;
+    # compile template source
+    ($template, $error) = $self->_compile($template, $self->_compiled_filename($name) );
 
-    return ( $template, $error );
+    if ($error) {
+        # return any compile time error
+        return ($template, $error);
+    }
+    else {
+        # Store compiled template and return it
+        return $self->store($name, $template->{data}) ;
+    }
 }
 
 
@@ -2334,6 +2335,7 @@ sub _template_content {
     local *FH;
     if (open(FH, "< $path")) {
         local $/;
+        binmode(FH);
         $data = <FH>;
         $mod_date = (stat($path))[9];
         close(FH);
@@ -2428,6 +2430,7 @@ sub _dump_cache {
 sub _decode_unicode {
     my $self   = shift;
     my $string = shift;
+    return undef unless defined $string;
 
     use bytes;
     require Encode;
@@ -2471,6 +2474,7 @@ package Template;
 
 use strict;
 use warnings;
+use 5.006;
 use base 'Template::Base';
 
 use Template::Config;
@@ -2479,8 +2483,9 @@ use Template::Provider;
 use Template::Service;
 use File::Basename;
 use File::Path;
+use Scalar::Util qw(blessed);
 
-our $VERSION = '2.19';
+our $VERSION = '2.22';
 our $ERROR   = '';
 our $DEBUG   = 0;
 our $BINMODE = 0 unless defined $BINMODE;
@@ -2493,7 +2498,7 @@ Template::Config->preload() if $ENV{ MOD_PERL };
 sub process {
     my ($self, $template, $vars, $outstream, @opts) = @_;
     my ($output, $error);
-    my $options = (@opts == 1) && UNIVERSAL::isa($opts[0], 'HASH')
+    my $options = (@opts == 1) && ref($opts[0]) eq 'HASH'
         ? shift(@opts) : { @opts };
 
     $options->{ binmode } = $BINMODE
@@ -2510,7 +2515,7 @@ sub process {
         unless (ref $outstream) {
             my $outpath = $self->{ OUTPUT_PATH };
             $outstream = "$outpath/$outstream" if $outpath;
-        }	
+        }   
 
         # send processed template to output stream, checking for error
         return ($self->error($error))
@@ -2591,7 +2596,7 @@ sub _output {
     }
     # call the print() method on an object that implements the method
     # (e.g. IO::Handle, Apache::Request, etc)
-    elsif (UNIVERSAL::can($where, 'print')) {
+    elsif (blessed($where) && $where->can('print')) {
         $where->print($$textref);
     }
     # a simple string is taken as a filename
@@ -7952,18 +7957,14 @@ sub
 	[#Rule 39
 		 'atomdir', 1,
 sub
-{ $_[0]->{ INFOR } || $_[0]->{ INWHILE }
-                                        ? 'last LOOP;'
-                                        : 'last;'                         }
+{ $_[0]->block_label('last ', ';')    }
 	],
 	[#Rule 40
 		 'atomdir', 1,
 sub
-{ $_[0]->{ INFOR }
-                                        ? $factory->next()
-                                        : ($_[0]->{ INWHILE }
-                                           ? 'next LOOP;'
-                                           : 'next;')                     }
+{ $_[0]->in_block('FOR')
+                                        ? $factory->next($_[0]->block_label)
+                                        : $_[0]->block_label('next ', ';') }
 	],
 	[#Rule 41
 		 'atomdir', 2,
@@ -8048,13 +8049,12 @@ sub
 	[#Rule 56
 		 '@1-3', 0,
 sub
-{ $_[0]->{ INFOR }++                  }
+{ $_[0]->enter_block('FOR')           }
 	],
 	[#Rule 57
 		 'loop', 6,
 sub
-{ $_[0]->{ INFOR }--;
-                                      $factory->foreach(@{$_[2]}, $_[5])  }
+{ $factory->foreach(@{$_[2]}, $_[5], $_[0]->leave_block)  }
 	],
 	[#Rule 58
 		 'loop', 3,
@@ -8064,18 +8064,17 @@ sub
 	[#Rule 59
 		 '@2-3', 0,
 sub
-{ $_[0]->{ INWHILE }++                }
+{ $_[0]->enter_block('WHILE')         }
 	],
 	[#Rule 60
 		 'loop', 6,
 sub
-{ $_[0]->{ INWHILE }--;
-                                      $factory->while(@_[2, 5])           }
+{ $factory->while(@_[2, 5], $_[0]->leave_block) }
 	],
 	[#Rule 61
 		 'loop', 3,
 sub
-{ $factory->while(@_[3, 1])           }
+{ $factory->while(@_[3, 1]) }
 	],
 	[#Rule 62
 		 'loopvar', 4,
@@ -8648,17 +8647,6 @@ sub
 1;
 
 
-
-
-
-
-
-
-
-
-
-
-
 }
 #
 # Inline include of Template/Directive.pm
@@ -8709,14 +8697,14 @@ sub {
     my \$context = shift || die "template sub called without context\\n";
     my \$stash   = \$context->stash;
     my \$output  = '';
-    my \$error;
+    my \$_tt_error;
     
     eval { BLOCK: {
 $block
     } };
     if (\$@) {
-        \$error = \$context->catch(\$@, \\\$output);
-        die \$error unless \$error->type eq 'return';
+        \$_tt_error = \$context->catch(\$@, \\\$output);
+        die \$_tt_error unless \$_tt_error->type eq 'return';
     }
 
     return \$output;
@@ -8734,14 +8722,14 @@ sub anon_block {
 
 $OUTPUT do {
     my \$output  = '';
-    my \$error;
+    my \$_tt_error;
     
     eval { BLOCK: {
 $block
     } };
     if (\$@) {
-        \$error = \$context->catch(\$@, \\\$output);
-        die \$error unless \$error->type eq 'return';
+        \$_tt_error = \$context->catch(\$@, \\\$output);
+        die \$_tt_error unless \$_tt_error->type eq 'return';
     }
 
     \$output;
@@ -8793,13 +8781,13 @@ sub ident {
     # does the first element of the identifier have a NAMESPACE
     # handler defined?
     if (ref $class && @$ident > 2 && ($ns = $class->{ NAMESPACE })) {
-	my $key = $ident->[0];
-	$key =~ s/^'(.+)'$/$1/s;
-	if ($ns = $ns->{ $key }) {
-	    return $ns->ident($ident);
-	}
+        my $key = $ident->[0];
+        $key =~ s/^'(.+)'$/$1/s;
+        if ($ns = $ns->{ $key }) {
+            return $ns->ident($ident);
+        }
     }
-	
+        
     if (scalar @$ident <= 2 && ! $ident->[1]) {
         $ident = $ident->[0];
     }
@@ -8959,20 +8947,21 @@ sub if {
 
 
 sub foreach {
-    my ($class, $target, $list, $args, $block) = @_;
+    my ($class, $target, $list, $args, $block, $label) = @_;
     $args  = shift @$args;
     $args  = @$args ? ', { ' . join(', ', @$args) . ' }' : '';
+    $label ||= 'LOOP';
 
     my ($loop_save, $loop_set, $loop_restore, $setiter);
     if ($target) {
-        $loop_save    = 'eval { $oldloop = ' . &ident($class, ["'loop'"]) . ' }';
-        $loop_set     = "\$stash->{'$target'} = \$value";
-        $loop_restore = "\$stash->set('loop', \$oldloop)";
+        $loop_save    = 'eval { $_tt_oldloop = ' . &ident($class, ["'loop'"]) . ' }';
+        $loop_set     = "\$stash->{'$target'} = \$_tt_value";
+        $loop_restore = "\$stash->set('loop', \$_tt_oldloop)";
     }
     else {
         $loop_save    = '$stash = $context->localise()';
-        $loop_set     = "\$stash->get(['import', [\$value]]) "
-                        . "if ref \$value eq 'HASH'";
+        $loop_set     = "\$stash->get(['import', [\$_tt_value]]) "
+                        . "if ref \$_tt_value eq 'HASH'";
         $loop_restore = '$stash = $context->delocalise()';
     }
     $block = pad($block, 3) if $PRETTY;
@@ -8980,37 +8969,39 @@ sub foreach {
     return <<EOF;
 
 do {
-    my (\$value, \$error, \$oldloop);
-    my \$list = $list;
+    my (\$_tt_value, \$_tt_error, \$_tt_oldloop);
+    my \$_tt_list = $list;
     
-    unless (UNIVERSAL::isa(\$list, 'Template::Iterator')) {
-        \$list = Template::Config->iterator(\$list)
+    unless (UNIVERSAL::isa(\$_tt_list, 'Template::Iterator')) {
+        \$_tt_list = Template::Config->iterator(\$_tt_list)
             || die \$Template::Config::ERROR, "\\n"; 
     }
 
-    (\$value, \$error) = \$list->get_first();
+    (\$_tt_value, \$_tt_error) = \$_tt_list->get_first();
     $loop_save;
-    \$stash->set('loop', \$list);
+    \$stash->set('loop', \$_tt_list);
     eval {
-LOOP:   while (! \$error) {
+$label:   while (! \$_tt_error) {
             $loop_set;
 $block;
-            (\$value, \$error) = \$list->get_next();
+            (\$_tt_value, \$_tt_error) = \$_tt_list->get_next();
         }
     };
     $loop_restore;
     die \$@ if \$@;
-    \$error = 0 if \$error && \$error eq Template::Constants::STATUS_DONE;
-    die \$error if \$error;
+    \$_tt_error = 0 if \$_tt_error && \$_tt_error eq Template::Constants::STATUS_DONE;
+    die \$_tt_error if \$_tt_error;
 };
 EOF
 }
 
 
 sub next {
+    my ($class, $label) = @_;
+    $label ||= 'LOOP';
     return <<EOF;
-(\$value, \$error) = \$list->get_next();
-next LOOP;
+(\$_tt_value, \$_tt_error) = \$_tt_list->get_next();
+next $label;
 EOF
 }
 
@@ -9067,19 +9058,20 @@ EOF
 
 
 sub while {
-    my ($class, $expr, $block) = @_;
+    my ($class, $expr, $block, $label) = @_;
     $block = pad($block, 2) if $PRETTY;
+    $label ||= 'LOOP';
 
     return <<EOF;
 
 do {
-    my \$failsafe = $WHILE_MAX;
-LOOP:
-    while (--\$failsafe && ($expr)) {
+    my \$_tt_failsafe = $WHILE_MAX;
+$label:
+    while (--\$_tt_failsafe && ($expr)) {
 $block
     }
     die "WHILE loop terminated (> $WHILE_MAX iterations)\\n"
-        unless \$failsafe;
+        unless \$_tt_failsafe;
 };
 EOF
 }
@@ -9099,9 +9091,9 @@ sub switch {
         $block = $case->[1];
         $block = pad($block, 1) if $PRETTY;
         $caseblock .= <<EOF;
-\$match = $match;
-\$match = [ \$match ] unless ref \$match eq 'ARRAY';
-if (grep(/^\$result\$/, \@\$match)) {
+\$_tt_match = $match;
+\$_tt_match = [ \$_tt_match ] unless ref \$_tt_match eq 'ARRAY';
+if (grep(/^\\Q\$_tt_result\\E\$/, \@\$_tt_match)) {
 $block
     last SWITCH;
 }
@@ -9115,8 +9107,8 @@ EOF
 return <<EOF;
 
 do {
-    my \$result = $expr;
-    my \$match;
+    my \$_tt_result = $expr;
+    my \$_tt_match;
     SWITCH: {
 $caseblock
     }
@@ -9136,7 +9128,7 @@ sub try {
     $block = pad($block, 2) if $PRETTY;
     $final = pop @catch;
     $final = "# FINAL\n" . ($final ? "$final\n" : '')
-           . 'die $error if $error;' . "\n" . '$output;';
+           . 'die $_tt_error if $_tt_error;' . "\n" . '$output;';
     $final = pad($final, 1) if $PRETTY;
 
     $n = 0;
@@ -9149,14 +9141,14 @@ sub try {
         $mblock = pad($mblock, 1) if $PRETTY;
         push(@$handlers, "'$match'");
         $catchblock .= $n++ 
-            ? "elsif (\$handler eq '$match') {\n$mblock\n}\n" 
-               : "if (\$handler eq '$match') {\n$mblock\n}\n";
+            ? "elsif (\$_tt_handler eq '$match') {\n$mblock\n}\n" 
+               : "if (\$_tt_handler eq '$match') {\n$mblock\n}\n";
     }
-    $catchblock .= "\$error = 0;";
+    $catchblock .= "\$_tt_error = 0;";
     $catchblock = pad($catchblock, 3) if $PRETTY;
     if ($default) {
         $default = pad($default, 1) if $PRETTY;
-        $default = "else {\n    # DEFAULT\n$default\n    \$error = '';\n}";
+        $default = "else {\n    # DEFAULT\n$default\n    \$_tt_error = '';\n}";
     }
     else {
         $default = '# NO DEFAULT';
@@ -9168,16 +9160,16 @@ return <<EOF;
 
 $OUTPUT do {
     my \$output = '';
-    my (\$error, \$handler);
+    my (\$_tt_error, \$_tt_handler);
     eval {
 $block
     };
     if (\$@) {
-        \$error = \$context->catch(\$@, \\\$output);
-        die \$error if \$error->type =~ /^return|stop\$/;
-        \$stash->set('error', \$error);
-        \$stash->set('e', \$error);
-        if (defined (\$handler = \$error->select_handler($handlers))) {
+        \$_tt_error = \$context->catch(\$@, \\\$output);
+        die \$_tt_error if \$_tt_error->type =~ /^return|stop\$/;
+        \$stash->set('error', \$_tt_error);
+        \$stash->set('e', \$_tt_error);
+        if (defined (\$_tt_handler = \$_tt_error->select_handler($handlers))) {
 $catchblock
         }
 $default
@@ -9226,7 +9218,7 @@ sub clear {
 }
 
 
-sub break {
+sub OLD_break {
     return 'last LOOP;';
 }
 
@@ -9274,15 +9266,15 @@ sub view {
     return <<EOF;
 do {
     my \$output = '';
-    my \$oldv = \$stash->get('view');
-    my \$view = \$context->view($hash);
-    \$stash->set($name, \$view);
-    \$stash->set('view', \$view);
+    my \$_tt_oldv = \$stash->get('view');
+    my \$_tt_view = \$context->view($hash);
+    \$stash->set($name, \$_tt_view);
+    \$stash->set('view', \$_tt_view);
 
 $block
 
-    \$stash->set('view', \$oldv);
-    \$view->seal();
+    \$stash->set('view', \$_tt_oldv);
+    \$_tt_view->seal();
 };
 EOF
 }
@@ -9306,14 +9298,14 @@ $block
     local(\$Template::Perl::context) = \$context;
     local(\$Template::Perl::stash)   = \$stash;
 
-    my \$result = '';
-    tie *Template::Perl::PERLOUT, 'Template::TieString', \\\$result;
-    my \$save_stdout = select *Template::Perl::PERLOUT;
+    my \$_tt_result = '';
+    tie *Template::Perl::PERLOUT, 'Template::TieString', \\\$_tt_result;
+    my \$_tt_save_stdout = select *Template::Perl::PERLOUT;
 
     eval \$output;
-    select \$save_stdout;
+    select \$_tt_save_stdout;
     \$context->throw(\$@) if \$@;
-    \$result;
+    \$_tt_result;
 };
 EOF
 }
@@ -9358,12 +9350,12 @@ sub filter {
 
 $OUTPUT do {
     my \$output = '';
-    my \$filter = \$context->filter($name)
+    my \$_tt_filter = \$context->filter($name)
               || \$context->throw(\$context->error);
 
 $block
     
-    &\$filter(\$output);
+    &\$_tt_filter(\$output);
 };
 EOF
 }
@@ -9404,20 +9396,20 @@ sub macro {
         my $nargs = scalar @$args;
         $args = join(', ', map { "'$_'" } @$args);
         $args = $nargs > 1 
-            ? "\@args{ $args } = splice(\@_, 0, $nargs)"
-            : "\$args{ $args } = shift";
+            ? "\@_tt_args{ $args } = splice(\@_, 0, $nargs)"
+            : "\$_tt_args{ $args } = shift";
 
         return <<EOF;
 
 \$stash->set('$ident', sub {
     my \$output = '';
-    my (%args, \$params);
+    my (%_tt_args, \$_tt_params);
     $args;
-    \$params = shift;
-    \$params = { } unless ref(\$params) eq 'HASH';
-    \$params = { \%args, %\$params };
+    \$_tt_params = shift;
+    \$_tt_params = { } unless ref(\$_tt_params) eq 'HASH';
+    \$_tt_params = { \%_tt_args, %\$_tt_params };
 
-    my \$stash = \$context->localise(\$params);
+    my \$stash = \$context->localise(\$_tt_params);
     eval {
 $block
     };
@@ -9432,10 +9424,10 @@ EOF
         return <<EOF;
 
 \$stash->set('$ident', sub {
-    my \$params = \$_[0] if ref(\$_[0]) eq 'HASH';
+    my \$_tt_params = \$_[0] if ref(\$_[0]) eq 'HASH';
     my \$output = '';
 
-    my \$stash = \$context->localise(\$params);
+    my \$stash = \$context->localise(\$_tt_params);
     eval {
 $block
     };
@@ -9515,9 +9507,9 @@ our $DEFAULT_STYLE = {
 };
 
 our $QUOTED_ESCAPES = {
-	n => "\n",
-	r => "\r",
-	t => "\t",
+        n => "\n",
+        r => "\r",
+        t => "\t",
 };
 
 our $CHOMP_FLAGS  = qr/[-=~+]/;
@@ -9528,7 +9520,7 @@ our $CHOMP_FLAGS  = qr/[-=~+]/;
 
 sub new {
     my $class  = shift;
-    my $config = $_[0] && UNIVERSAL::isa($_[0], 'HASH') ? shift(@_) : { @_ };
+    my $config = $_[0] && ref($_[0]) eq 'HASH' ? shift(@_) : { @_ };
     my ($tagstyle, $debug, $start, $end, $defaults, $grammar, $hash, $key, $udef);
 
     my $self = bless { 
@@ -9544,7 +9536,8 @@ sub new {
         FILE_INFO   => 1,
         GRAMMAR     => undef,
         _ERROR      => '',
-        FACTORY     => 'Template::Directive',
+        IN_BLOCK    => [ ],
+        FACTORY     => $config->{ FACTORY } || 'Template::Directive',
     }, $class;
 
     # update self with any relevant keys in config
@@ -9590,9 +9583,39 @@ sub new {
     
     $self->new_style($config)
         || return $class->error($self->error());
-	
+        
     return $self;
 }
+
+
+sub enter_block {
+    my ($self, $name) = @_;
+    my $blocks = $self->{ IN_BLOCK };
+    push(@{ $self->{ IN_BLOCK } }, $name);
+}
+
+sub leave_block {
+    my $self = shift;
+    my $label = $self->block_label;
+    pop(@{ $self->{ IN_BLOCK } });
+    return $label;
+}
+
+sub in_block {
+    my ($self, $name) = @_;
+    my $blocks = $self->{ IN_BLOCK };
+    return @$blocks && $blocks->[-1] eq $name;
+}
+
+sub block_label {
+    my ($self, $prefix, $suffix) = @_;
+    my $blocks = $self->{ IN_BLOCK };
+    my $name   = @$blocks 
+        ? $blocks->[-1] . scalar @$blocks 
+        : undef;
+    return join('', grep { defined $_ } $prefix, $name, $suffix);
+}
+
 
 
 
@@ -9638,7 +9661,7 @@ sub parse {
     my ($tokens, $block);
 
     $info->{ DEBUG } = $self->{ DEBUG_DIRS }
-	unless defined $info->{ DEBUG };
+        unless defined $info->{ DEBUG };
 
 
     # store for blocks defined in the template (see define_block())
@@ -9650,7 +9673,7 @@ sub parse {
 
     # split file into TEXT/DIRECTIVE chunks
     $tokens = $self->split_text($text)
-        || return undef;				    ## RETURN ##
+        || return undef;                                    ## RETURN ##
 
     push(@{ $self->{ FILEINFO } }, $info);
 
@@ -9659,7 +9682,7 @@ sub parse {
 
     pop(@{ $self->{ FILEINFO } });
 
-    return undef unless $block;				    ## RETURN ##
+    return undef unless $block;                             ## RETURN ##
 
     $self->debug("compiled main template document block:\n$block")
         if $self->{ DEBUG } & Template::Constants::DEBUG_PARSER;
@@ -9680,12 +9703,13 @@ sub split_text {
     my $style = $self->{ STYLE }->[-1];
     my ($start, $end, $prechomp, $postchomp, $interp ) = 
         @$style{ qw( START_TAG END_TAG PRE_CHOMP POST_CHOMP INTERPOLATE ) };
+    my $tags_dir = $self->{ANYCASE} ? qr<TAGS>i : qr<TAGS>;
 
     my @tokens = ();
     my $line = 1;
 
-    return \@tokens					    ## RETURN ##
-	unless defined $text && length $text;
+    return \@tokens                                         ## RETURN ##
+        unless defined $text && length $text;
 
     # extract all directives from the text
     while ($text =~ s/
@@ -9718,7 +9742,7 @@ sub split_text {
                 if ($chomp && $pre) {
                     # chomp off whitespace and newline preceding directive
                     if ($chomp == CHOMP_ALL) { 
-                        $pre =~ s{ (\n|^) [^\S\n]* \z }{}mx;
+                        $pre =~ s{ (\r?\n|^) [^\S\n]* \z }{}mx;
                     }
                     elsif ($chomp == CHOMP_COLLAPSE) { 
                         $pre =~ s{ (\s+) \z }{ }x;
@@ -9761,7 +9785,7 @@ sub split_text {
         # and now the directive, along with line number information
         if (length $dir) {
             # the TAGS directive is a compile-time switch
-            if ($dir =~ /^TAGS\s+(.*)/i) {
+            if ($dir =~ /^$tags_dir\s+(.*)/) {
                 my @tags = split(/\s+/, $1);
                 if (scalar @tags > 1) {
                     ($start, $end) = map { quotemeta($_) } @tags;
@@ -9796,7 +9820,7 @@ sub split_text {
          : ( 'TEXT', $text) )
         if length $text;
         
-    return \@tokens;					    ## RETURN ##
+    return \@tokens;                                        ## RETURN ##
 }
     
 
@@ -9812,32 +9836,32 @@ sub interpolate_text {
            /
            ( (?: \\. | [^\$] ){1,3000} ) # escaped or non-'$' character [$1]
            |
-	   ( \$ (?:		    # embedded variable	           [$2]
-	     (?: \{ ([^\}]*) \} )   # ${ ... }                     [$3]
-	     |
-	     ([\w\.]+)		    # $word                        [$4]
-	     )
-	   )
-	/gx) {
+           ( \$ (?:                 # embedded variable            [$2]
+             (?: \{ ([^\}]*) \} )   # ${ ... }                     [$3]
+             |
+             ([\w\.]+)              # $word                        [$4]
+             )
+           )
+        /gx) {
 
-	($pre, $var, $dir) = ($1, $3 || $4, $2);
+        ($pre, $var, $dir) = ($1, $3 || $4, $2);
 
-	# preceding text
-	if (defined($pre) && length($pre)) {
-	    $line += $pre =~ tr/\n//;
-	    $pre =~ s/\\\$/\$/g;
-	    push(@tokens, 'TEXT', $pre);
-	}
-	# $variable reference
+        # preceding text
+        if (defined($pre) && length($pre)) {
+            $line += $pre =~ tr/\n//;
+            $pre =~ s/\\\$/\$/g;
+            push(@tokens, 'TEXT', $pre);
+        }
+        # $variable reference
         if ($var) {
-	    $line += $dir =~ tr/\n/ /;
-	    push(@tokens, [ $dir, $line, $self->tokenise_directive($var) ]);
-	}
-	# other '$' reference - treated as text
-	elsif ($dir) {
-	    $line += $dir =~ tr/\n//;
-	    push(@tokens, 'TEXT', $dir);
-	}
+            $line += $dir =~ tr/\n/ /;
+            push(@tokens, [ $dir, $line, $self->tokenise_directive($var) ]);
+        }
+        # other '$' reference - treated as text
+        elsif ($dir) {
+            $line += $dir =~ tr/\n//;
+            push(@tokens, 'TEXT', $dir);
+        }
     }
 
     return \@tokens;
@@ -9855,108 +9879,114 @@ sub tokenise_directive {
     my @tokens = ( );
 
     while ($text =~ 
-	    / 
-		# strip out any comments
-	        (\#[^\n]*)
-	   |
-		# a quoted phrase matches in $3
-		(["'])                   # $2 - opening quote, ' or "
-		(                        # $3 - quoted text buffer
-		    (?:                  # repeat group (no backreference)
-			\\\\             # an escaped backslash \\
-		    |                    # ...or...
-			\\\2             # an escaped quote \" or \' (match $1)
-		    |                    # ...or...
-			.                # any other character
-		    |	\n
-		    )*?                  # non-greedy repeat
-		)                        # end of $3
-		\2                       # match opening quote
-	    |
-		# an unquoted number matches in $4
-		(-?\d+(?:\.\d+)?)       # numbers
-	    |
-		# filename matches in $5
-	    	( \/?\w+(?:(?:\/|::?)\w*)+ | \/\w+)
-	    |
-		# an identifier matches in $6
-		(\w+)                    # variable identifier
-	    |   
-		# an unquoted word or symbol matches in $7
-		(   [(){}\[\]:;,\/\\]    # misc parenthesis and symbols
-		|   [+\-*]               # math operations
-		|   \$\{?                # dollar with option left brace
-		|   =>			 # like '='
-		|   [=!<>]?= | [!<>]     # eqality tests
-		|   &&? | \|\|?          # boolean ops
-		|   \.\.?                # n..n sequence
- 		|   \S+                  # something unquoted
-		)                        # end of $7
-	    /gmxo) {
+            / 
+                # strip out any comments
+                (\#[^\n]*)
+           |
+                # a quoted phrase matches in $3
+                (["'])                   # $2 - opening quote, ' or "
+                (                        # $3 - quoted text buffer
+                    (?:                  # repeat group (no backreference)
+                        \\\\             # an escaped backslash \\
+                    |                    # ...or...
+                        \\\2             # an escaped quote \" or \' (match $1)
+                    |                    # ...or...
+                        .                # any other character
+                    |   \n
+                    )*?                  # non-greedy repeat
+                )                        # end of $3
+                \2                       # match opening quote
+            |
+                # an unquoted number matches in $4
+                (-?\d+(?:\.\d+)?)       # numbers
+            |
+                # filename matches in $5
+                ( \/?\w+(?:(?:\/|::?)\w*)+ | \/\w+)
+            |
+                # an identifier matches in $6
+                (\w+)                    # variable identifier
+            |   
+                # an unquoted word or symbol matches in $7
+                (   [(){}\[\]:;,\/\\]    # misc parenthesis and symbols
+                |   [+\-*]               # math operations
+                |   \$\{?                # dollar with option left brace
+                |   =>                   # like '='
+                |   [=!<>]?= | [!<>]     # eqality tests
+                |   &&? | \|\|?          # boolean ops
+                |   \.\.?                # n..n sequence
+                |   \S+                  # something unquoted
+                )                        # end of $7
+            /gmxo) {
 
-	# ignore comments to EOL
-	next if $1;
+        # ignore comments to EOL
+        next if $1;
 
-	# quoted string
-	if (defined ($token = $3)) {
+        # quoted string
+        if (defined ($token = $3)) {
             # double-quoted string may include $variable references
-	    if ($2 eq '"') {
-	        if ($token =~ /[\$\\]/) {
-		    $type = 'QUOTED';
-		    # unescape " and \ but leave \$ escaped so that 
-			# interpolate_text() doesn't incorrectly treat it
-		    # as a variable reference
-			for ($token) {
-				s/\\([^\$nrt])/$1/g;
-				s/\\([nrt])/$QUOTED_ESCAPES->{ $1 }/ge;
-			}
-		    push(@tokens, ('"') x 2,
-				  @{ $self->interpolate_text($token) },
-				  ('"') x 2);
-		    next;
-		}
+            if ($2 eq '"') {
+                if ($token =~ /[\$\\]/) {
+                    $type = 'QUOTED';
+                    # unescape " and \ but leave \$ escaped so that 
+                        # interpolate_text() doesn't incorrectly treat it
+                    # as a variable reference
+                        for ($token) {
+                                s/\\([^\$nrt])/$1/g;
+                                s/\\([nrt])/$QUOTED_ESCAPES->{ $1 }/ge;
+                        }
+                    push(@tokens, ('"') x 2,
+                                  @{ $self->interpolate_text($token) },
+                                  ('"') x 2);
+                    next;
+                }
                 else {
-	            $type = 'LITERAL';
-		    $token =~ s['][\\']g;
-		    $token = "'$token'";
-		}
-	    } 
-	    else {
-		$type = 'LITERAL';
-		$token = "'$token'";
-	    }
-	}
-	# number
-	elsif (defined ($token = $4)) {
-	    $type = 'NUMBER';
-	}
-	elsif (defined($token = $5)) {
-	    $type = 'FILENAME';
-	}
-	elsif (defined($token = $6)) {
-	    # reserved words may be in lower case unless case sensitive
-	    $uctoken = $anycase ? uc $token : $token;
-	    if (defined ($type = $lextable->{ $uctoken })) {
-		$token = $uctoken;
-	    }
-	    else {
-		$type = 'IDENT';
-	    }
-	}
-	elsif (defined ($token = $7)) {
-	    # reserved words may be in lower case unless case sensitive
-	    $uctoken = $anycase ? uc $token : $token;
-	    unless (defined ($type = $lextable->{ $uctoken })) {
-		$type = 'UNQUOTED';
-	    }
-	}
+                    $type = 'LITERAL';
+                    $token =~ s['][\\']g;
+                    $token = "'$token'";
+                }
+            } 
+            else {
+                $type = 'LITERAL';
+                $token = "'$token'";
+            }
+        }
+        # number
+        elsif (defined ($token = $4)) {
+            $type = 'NUMBER';
+        }
+        elsif (defined($token = $5)) {
+            $type = 'FILENAME';
+        }
+        elsif (defined($token = $6)) {
+            # Fold potential keywords to UPPER CASE if the ANYCASE option is
+            # set, unless (we've got some preceeding tokens and) the previous
+            # token is a DOT op.  This prevents the 'last' in 'data.last'
+            # from being interpreted as the LAST keyword.
+            $uctoken = 
+                ($anycase && (! @tokens || $tokens[-2] ne 'DOT'))
+                    ? uc $token
+                    :    $token;
+            if (defined ($type = $lextable->{ $uctoken })) {
+                $token = $uctoken;
+            }
+            else {
+                $type = 'IDENT';
+            }
+        }
+        elsif (defined ($token = $7)) {
+            # reserved words may be in lower case unless case sensitive
+            $uctoken = $anycase ? uc $token : $token;
+            unless (defined ($type = $lextable->{ $uctoken })) {
+                $type = 'UNQUOTED';
+            }
+        }
 
-	push(@tokens, $type, $token);
+        push(@tokens, $type, $token);
 
     }
 
 
-    return \@tokens;					    ## RETURN ##
+    return \@tokens;                                        ## RETURN ##
 }
 
 
@@ -9967,7 +9997,7 @@ sub define_block {
         || return undef;
 
     $self->debug("compiled block '$name':\n$block")
-	if $self->{ DEBUG } & Template::Constants::DEBUG_PARSER;
+        if $self->{ DEBUG } & Template::Constants::DEBUG_PARSER;
 
     $defblock->{ $name } = $block;
     
@@ -10012,6 +10042,7 @@ sub location {
     my $file = $info->{ path } || $info->{ name } 
         || '(unknown template)';
     $line =~ s/\-.*$//; # might be 'n-n'
+    $line ||= 1;
     return "#line $line \"$file\"\n";
 }
 
@@ -10022,7 +10053,7 @@ sub _parse {
     my ($self, $tokens, $info) = @_;
     my ($token, $value, $text, $line, $inperl);
     my ($state, $stateno, $status, $action, $lookup, $coderet, @codevars);
-    my ($lhs, $len, $code);	    # rule contents
+    my ($lhs, $len, $code);         # rule contents
     my $stack = [ [ 0, undef ] ];   # DFA stack
 
 
@@ -10041,152 +10072,152 @@ sub _parse {
     my $in_string = 0;
 
     while(1) {
-	# get state number and state
-	$stateno =  $stack->[-1]->[0];
-	$state   = $states->[$stateno];
+        # get state number and state
+        $stateno =  $stack->[-1]->[0];
+        $state   = $states->[$stateno];
 
-	# see if any lookaheads exist for the current state
-	if (exists $state->{'ACTIONS'}) {
+        # see if any lookaheads exist for the current state
+        if (exists $state->{'ACTIONS'}) {
 
-	    # get next token and expand any directives (i.e. token is an 
-	    # array ref) onto the front of the token list
-	    while (! defined $token && @$tokens) {
-		$token = shift(@$tokens);
-		if (ref $token) {
-		    ($text, $line, $token) = @$token;
-		    if (ref $token) {
-			if ($info->{ DEBUG } && ! $in_string) {
+            # get next token and expand any directives (i.e. token is an 
+            # array ref) onto the front of the token list
+            while (! defined $token && @$tokens) {
+                $token = shift(@$tokens);
+                if (ref $token) {
+                    ($text, $line, $token) = @$token;
+                    if (ref $token) {
+                        if ($info->{ DEBUG } && ! $in_string) {
                             # - - - - - - - - - - - - - - - - - - - - - - - - -
-			    # This is gnarly.  Look away now if you're easily
+                            # This is gnarly.  Look away now if you're easily
                             # frightened.  We're pushing parse tokens onto the
                             # pending list to simulate a DEBUG directive like so:
-			    # [% DEBUG msg line='20' text='INCLUDE foo' %]
+                            # [% DEBUG msg line='20' text='INCLUDE foo' %]
                             # - - - - - - - - - - - - - - - - - - - - - - - - -
-			    my $dtext = $text;
-			    $dtext =~ s[(['\\])][\\$1]g;
-			    unshift(@$tokens, 
-				    DEBUG   => 'DEBUG',
-				    IDENT   => 'msg',
-				    IDENT   => 'line',
-				    ASSIGN  => '=',
-				    LITERAL => "'$line'",
-				    IDENT   => 'text',
-				    ASSIGN  => '=',
-				    LITERAL => "'$dtext'",
-				    IDENT   => 'file',
-				    ASSIGN  => '=',
-				    LITERAL => "'$info->{ name }'",
-				    (';') x 2,
-				    @$token, 
-				    (';') x 2);
-			}
-			else {
-			    unshift(@$tokens, @$token, (';') x 2);
-			}
-			$token = undef;  # force redo
-		    }
-		    elsif ($token eq 'ITEXT') {
-			if ($inperl) {
-			    # don't perform interpolation in PERL blocks
-			    $token = 'TEXT';
-			    $value = $text;
-			}
-			else {
-			    unshift(@$tokens, 
-				    @{ $self->interpolate_text($text, $line) });
-			    $token = undef; # force redo
-			}
-		    }
-		}
-		else {
-		    # toggle string flag to indicate if we're crossing
-		    # a string boundary
-		    $in_string = ! $in_string if $token eq '"';
-		    $value = shift(@$tokens);
-		}
-	    };
-	    # clear undefined token to avoid 'undefined variable blah blah'
-	    # warnings and let the parser logic pick it up in a minute
-	    $token = '' unless defined $token;
+                            my $dtext = $text;
+                            $dtext =~ s[(['\\])][\\$1]g;
+                            unshift(@$tokens, 
+                                    DEBUG   => 'DEBUG',
+                                    IDENT   => 'msg',
+                                    IDENT   => 'line',
+                                    ASSIGN  => '=',
+                                    LITERAL => "'$line'",
+                                    IDENT   => 'text',
+                                    ASSIGN  => '=',
+                                    LITERAL => "'$dtext'",
+                                    IDENT   => 'file',
+                                    ASSIGN  => '=',
+                                    LITERAL => "'$info->{ name }'",
+                                    (';') x 2,
+                                    @$token, 
+                                    (';') x 2);
+                        }
+                        else {
+                            unshift(@$tokens, @$token, (';') x 2);
+                        }
+                        $token = undef;  # force redo
+                    }
+                    elsif ($token eq 'ITEXT') {
+                        if ($inperl) {
+                            # don't perform interpolation in PERL blocks
+                            $token = 'TEXT';
+                            $value = $text;
+                        }
+                        else {
+                            unshift(@$tokens, 
+                                    @{ $self->interpolate_text($text, $line) });
+                            $token = undef; # force redo
+                        }
+                    }
+                }
+                else {
+                    # toggle string flag to indicate if we're crossing
+                    # a string boundary
+                    $in_string = ! $in_string if $token eq '"';
+                    $value = shift(@$tokens);
+                }
+            };
+            # clear undefined token to avoid 'undefined variable blah blah'
+            # warnings and let the parser logic pick it up in a minute
+            $token = '' unless defined $token;
 
-	    # get the next state for the current lookahead token
-	    $action = defined ($lookup = $state->{'ACTIONS'}->{ $token })
-	              ? $lookup
-		      : defined ($lookup = $state->{'DEFAULT'})
-		        ? $lookup
-		        : undef;
-	}
-	else {
-	    # no lookahead actions
-	    $action = $state->{'DEFAULT'};
-	}
+            # get the next state for the current lookahead token
+            $action = defined ($lookup = $state->{'ACTIONS'}->{ $token })
+                      ? $lookup
+                      : defined ($lookup = $state->{'DEFAULT'})
+                        ? $lookup
+                        : undef;
+        }
+        else {
+            # no lookahead actions
+            $action = $state->{'DEFAULT'};
+        }
 
-	# ERROR: no ACTION
-	last unless defined $action;
+        # ERROR: no ACTION
+        last unless defined $action;
 
-	# - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-	# shift (+ive ACTION)
-	# - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-	if ($action > 0) {
-	    push(@$stack, [ $action, $value ]);
-	    $token = $value = undef;
-	    redo;
-	};
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        # shift (+ive ACTION)
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        if ($action > 0) {
+            push(@$stack, [ $action, $value ]);
+            $token = $value = undef;
+            redo;
+        };
 
-	# - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-	# reduce (-ive ACTION)
-	# - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-	($lhs, $len, $code) = @{ $rules->[ -$action ] };
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        # reduce (-ive ACTION)
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        ($lhs, $len, $code) = @{ $rules->[ -$action ] };
 
-	# no action imples ACCEPTance
-	$action
-	    or $status = ACCEPT;
+        # no action imples ACCEPTance
+        $action
+            or $status = ACCEPT;
 
-	# use dummy sub if code ref doesn't exist
-	$code = sub { $_[1] }
-	    unless $code;
+        # use dummy sub if code ref doesn't exist
+        $code = sub { $_[1] }
+            unless $code;
 
-	@codevars = $len
-		?   map { $_->[1] } @$stack[ -$len .. -1 ]
-		:   ();
+        @codevars = $len
+                ?   map { $_->[1] } @$stack[ -$len .. -1 ]
+                :   ();
 
-	eval {
-	    $coderet = &$code( $self, @codevars );
-	};
-	if ($@) {
-	    my $err = $@;
-	    chomp $err;
-	    return $self->_parse_error($err);
-	}
+        eval {
+            $coderet = &$code( $self, @codevars );
+        };
+        if ($@) {
+            my $err = $@;
+            chomp $err;
+            return $self->_parse_error($err);
+        }
 
-	# reduce stack by $len
-	splice(@$stack, -$len, $len);
+        # reduce stack by $len
+        splice(@$stack, -$len, $len);
 
-	# ACCEPT
-	return $coderet					    ## RETURN ##
-	    if $status == ACCEPT;
+        # ACCEPT
+        return $coderet                                     ## RETURN ##
+            if $status == ACCEPT;
 
-	# ABORT
-	return undef					    ## RETURN ##
-	    if $status == ABORT;
+        # ABORT
+        return undef                                        ## RETURN ##
+            if $status == ABORT;
 
-	# ERROR
-	last 
-	    if $status == ERROR;
+        # ERROR
+        last 
+            if $status == ERROR;
     }
     continue {
-	push(@$stack, [ $states->[ $stack->[-1][0] ]->{'GOTOS'}->{ $lhs }, 
-	      $coderet ]), 
+        push(@$stack, [ $states->[ $stack->[-1][0] ]->{'GOTOS'}->{ $lhs }, 
+              $coderet ]), 
     }
 
-    # ERROR						    ## RETURN ##
+    # ERROR                                                 ## RETURN ##
     return $self->_parse_error('unexpected end of input')
-	unless defined $value;
+        unless defined $value;
 
     # munge text of last directive to make it readable
 
     return $self->_parse_error("unexpected end of directive", $text)
-	if $value eq ';';   # end of directive SEPARATOR
+        if $value eq ';';   # end of directive SEPARATOR
 
     return $self->_parse_error("unexpected token ($value)", $text);
 }
@@ -10201,7 +10232,7 @@ sub _parse_error {
     $line = 'unknown' unless $line;
 
     $msg .= "\n  [% $text %]"
-	if defined $text;
+        if defined $text;
 
     return $self->error("line $line: $msg");
 }
@@ -10215,10 +10246,10 @@ sub _dump {
     my $key;
 
     foreach $key (qw( START_TAG END_TAG TAG_STYLE ANYCASE INTERPOLATE 
-		      PRE_CHOMP POST_CHOMP V1DOLLAR )) {
-	my $val = $self->{ $key };
-	$val = '<undef>' unless defined $val;
-	$output .= sprintf($format, $key, $val);
+                      PRE_CHOMP POST_CHOMP V1DOLLAR )) {
+        my $val = $self->{ $key };
+        $val = '<undef>' unless defined $val;
+        $output .= sprintf($format, $key, $val);
     }
 
     $output .= '}';
@@ -17439,16 +17470,7 @@ proto._dotop = function(root, item, args, lvalue) {
             } else {
                 return root[item];
             }
-        } /*
-        	//this section was for automatic global scope access
-        	else if (atroot && typeof this.data.GLOBAL[item] != 'undefined' && this.__config__.GLOBAL && item != 'LOCAL' ) {
-            
-            if (typeof this.data.GLOBAL[item] == 'function' ) {
-                result = this.data.GLOBAL[item].apply(root,args);
-            } else {
-                return this.data.GLOBAL[item];
-            }
-        }*/ else if (lvalue) {
+        } else if (lvalue) {
             return root[item] = {};
         } else if (this.hash_functions[item] && !atroot || item == 'import') {
             args.unshift(root);
@@ -17470,48 +17492,7 @@ proto._dotop = function(root, item, args, lvalue) {
             for (var i = 0; i < item.length; i++) result.push(root[item[i]]);
             return result;
         }
-    } /*else if ( (root.constructor != Object) && (root instanceof Object) ) {
-        //this section was proposed for calling method on blessed reference in Perl
-		//not sure how well it is playing with javascript
-		try {
-            result = root[item].apply(root,args);
-        } catch (e) {
-            var my_class = root.constructor.name;
-            
-            if (false) throw "Cant locate method"; 
-            
-            if (root instanceof Array) {
-                if (this.list_functions[item]) {
-                    args.unshift(root);
-                    result = this.list_functions[item].apply(this,args);
-                } else if (typeof item == 'string' && /^-?\d+$/.test(item) || typeof item == 'number' ) {
-                    if (typeof root[item] != 'function') return root[item];
-                    result = root[item].apply(this, args);
-                } else if (item instanceof Array) {
-                    for (var i = 0; i < item.length; i++) result.push(root[item[i]]);
-                    return result;
-                }
-            } else if (typeof root == 'object') {
-                if (typeof root[item] != 'undefined' && root[item] != null) {//consider undefined == null
-                    if (typeof root[item] == 'function') {
-                        result = root[item].apply(this,args);
-                    } else {
-                        return root[item];
-                    }
-                } else if (this.hash_functions[item]) {
-                    args.unshift(root);
-                    result = this.hash_functions[item].apply(this,args);
-                } 
-            } else if (this.string_functions[item]) {
-                args.unshift(root);
-                result = this.string_functions[item].apply(this, args);
-            } else if (this.list_functions[item]) {
-                args.unshift([root]);
-                result = this.list_functions[item].apply(this,args);
-            } 
-            
-        }
-    }*/ else if (this.string_functions[item] && !lvalue) {
+    } else if (this.string_functions[item] && !lvalue) {
         args.unshift(root);
         result = this.string_functions[item].apply(this, args);
     } else if (this.list_functions[item] && !lvalue) {
@@ -17544,10 +17525,6 @@ proto._assign = function(root, item, args, value, set_default) {
     }
     
     if (atroot || root.constructor == Object || root == this.data.GLOBAL) {
-//this section was for automatic global scope access    	
-//		if (atroot && this.__config__.GLOBAL && typeof root[item] == 'undefined' && typeof this.data.GLOBAL[item] != 'undefined' && !set_default) { 
-//            return this.data.GLOBAL[item] = value;
-//        }
 		
 		if (root == this.LOCAL_ANCHOR) root = this.data;
 			 
@@ -17622,7 +17599,7 @@ proto.string_functions.list = function(string) {
 
 // match(re)       get list of matches
 proto.string_functions.match = function(string, re, modifiers) {
-    var regexp = new RegExp(re, modifiers);
+    var regexp = new RegExp(re, modifiers == undefined ? 'g' : modifiers);
     var list = string.match(regexp);
     return list;
 }
@@ -17639,7 +17616,7 @@ proto.string_functions.repeat = function(string, args) {
 
 // replace(re, sub, global)    replace instances of re with sub
 proto.string_functions.replace = function(string, re, sub, modifiers) {
-    var regexp = new RegExp(re,modifiers);    
+    var regexp = new RegExp(re, modifiers == undefined ? 'g' : modifiers);    
     if (! sub) sub  = '';
 
     return string.replace(regexp, sub);
@@ -17899,6 +17876,20 @@ proto.hash_functions.values = function(hash) {
     return list;
 }
 
+proto.hash_functions.pairs = function(hash) {
+    var list = new Array();
+    var keys = new Array();
+    for ( var key in hash ) {
+        keys.push( key );
+    }
+    keys.sort();
+    for ( var key in keys ) {
+        key = keys[key]
+        list.push( { 'key': key, 'value': hash[key] } );
+    }
+    return list;
+}
+
 //  delete
 proto.hash_functions.remove = function(hash, key) {
     return delete hash[key];
@@ -18148,8 +18139,8 @@ sub json_json2_internal {
 var JSON;
 
 /*
-    json2.js
-    2008-03-24
+    http://www.JSON.org/json2.js
+    2009-04-16
 
     Public Domain.
 
@@ -18157,44 +18148,48 @@ var JSON;
 
     See http://www.JSON.org/js.html
 
-    This file creates a global JSON object containing three methods: stringify,
-    parse, and quote.
-
+    This file creates a global JSON object containing two methods: stringify
+    and parse.
 
         JSON.stringify(value, replacer, space)
             value       any JavaScript value, usually an object or array.
 
             replacer    an optional parameter that determines how object
-                        values are stringified for objects without a toJSON
-                        method. It can be a function or an array.
+                        values are stringified for objects. It can be a
+                        function or an array of strings.
 
             space       an optional parameter that specifies the indentation
                         of nested structures. If it is omitted, the text will
                         be packed without extra whitespace. If it is a number,
                         it will specify the number of spaces to indent at each
-                        level. If it is a string (such as '\t'), it contains the
-                        characters used to indent at each level.
+                        level. If it is a string (such as '\t' or '&nbsp;'),
+                        it contains the characters used to indent at each level.
 
             This method produces a JSON text from a JavaScript value.
 
             When an object value is found, if the object contains a toJSON
-            method, its toJSON method with be called and the result will be
+            method, its toJSON method will be called and the result will be
             stringified. A toJSON method does not serialize: it returns the
             value represented by the name/value pair that should be serialized,
-            or undefined if nothing should be serialized. The toJSON method will
-            be passed the key associated with the value, and this will be bound
-            to the object holding the key.
+            or undefined if nothing should be serialized. The toJSON method
+            will be passed the key associated with the value, and this will be
+            bound to the object holding the key.
 
-            This is the toJSON method added to Dates:
+            For example, this would serialize Dates as ISO strings.
 
-                function toJSON(key) {
+                Date.prototype.toJSON = function (key) {
+                    function f(n) {
+                        // Format integers to have at least two digits.
+                        return n < 10 ? '0' + n : n;
+                    }
+
                     return this.getUTCFullYear()   + '-' +
                          f(this.getUTCMonth() + 1) + '-' +
                          f(this.getUTCDate())      + 'T' +
                          f(this.getUTCHours())     + ':' +
                          f(this.getUTCMinutes())   + ':' +
                          f(this.getUTCSeconds())   + 'Z';
-                }
+                };
 
             You can provide an optional replacer method. It will be passed the
             key and value of each member, with this bound to the containing
@@ -18202,35 +18197,24 @@ var JSON;
             serialized. If your method returns undefined, then the member will
             be excluded from the serialization.
 
-            If no replacer parameter is provided, then a default replacer
-            will be used:
-
-                function replacer(key, value) {
-                    return Object.hasOwnProperty.call(this, key) ?
-                        value : undefined;
-                }
-
-            The default replacer is passed the key and value for each item in
-            the structure. It excludes inherited members.
-
-            If the replacer parameter is an array, then it will be used to
-            select the members to be serialized. It filters the results such
-            that only members with keys listed in the replacer array are
+            If the replacer parameter is an array of strings, then it will be
+            used to select the members to be serialized. It filters the results
+            such that only members with keys listed in the replacer array are
             stringified.
 
-            Values that do not have JSON representaions, such as undefined or
+            Values that do not have JSON representations, such as undefined or
             functions, will not be serialized. Such values in objects will be
             dropped; in arrays they will be replaced with null. You can use
             a replacer function to replace those with JSON values.
             JSON.stringify(undefined) returns undefined.
 
-            The optional space parameter produces a stringification of the value
-            that is filled with line breaks and indentation to make it easier to
-            read.
+            The optional space parameter produces a stringification of the
+            value that is filled with line breaks and indentation to make it
+            easier to read.
 
             If the space parameter is a non-empty string, then that string will
             be used for indentation. If the space parameter is a number, then
-            then indentation will be that many spaces.
+            the indentation will be that many spaces.
 
             Example:
 
@@ -18241,16 +18225,22 @@ var JSON;
             text = JSON.stringify(['e', {pluribus: 'unum'}], null, '\t');
             // text is '[\n\t"e",\n\t{\n\t\t"pluribus": "unum"\n\t}\n]'
 
+            text = JSON.stringify([new Date()], function (key, value) {
+                return this[key] instanceof Date ?
+                    'Date(' + this[key] + ')' : value;
+            });
+            // text is '["Date(---current time---)"]'
+
 
         JSON.parse(text, reviver)
             This method parses a JSON text to produce an object or array.
             It can throw a SyntaxError exception.
 
             The optional reviver parameter is a function that can filter and
-            transform the results. It receives each of the keys and values, and
-            its return value is used instead of the original value. If it
-            returns what it received, then structure is not modified. If it
-            returns undefined then the member is deleted.
+            transform the results. It receives each of the keys and values,
+            and its return value is used instead of the original value.
+            If it returns what it received, then the structure is not modified.
+            If it returns undefined then the member is deleted.
 
             Example:
 
@@ -18270,45 +18260,57 @@ var JSON;
                 return value;
             });
 
-
-        JSON.quote(text)
-            This method wraps a string in quotes, escaping some characters
-            as needed.
+            myData = JSON.parse('["Date(09/09/2001)"]', function (key, value) {
+                var d;
+                if (typeof value === 'string' &&
+                        value.slice(0, 5) === 'Date(' &&
+                        value.slice(-1) === ')') {
+                    d = new Date(value.slice(5, -1));
+                    if (d) {
+                        return d;
+                    }
+                }
+                return value;
+            });
 
 
     This is a reference implementation. You are free to copy, modify, or
     redistribute.
 
-    USE YOUR OWN COPY. IT IS EXTREMELY UNWISE TO LOAD THIRD PARTY
-    CODE INTO YOUR PAGES.
+    This code should be minified before deployment.
+    See http://javascript.crockford.com/jsmin.html
+
+    USE YOUR OWN COPY. IT IS EXTREMELY UNWISE TO LOAD CODE FROM SERVERS YOU DO
+    NOT CONTROL.
 */
 
-/*jslint regexp: true, forin: true, evil: true */
+/*jslint evil: true */
 
 /*global JSON */
 
 /*members "", "\b", "\t", "\n", "\f", "\r", "\"", JSON, "\\", apply,
-    call, charCodeAt, floor, getUTCDate, getUTCFullYear, getUTCHours,
-    getUTCMinutes, getUTCMonth, getUTCSeconds, hasOwnProperty, join, length,
-    parse, propertyIsEnumerable, prototype, push, quote, replace, stringify,
-    test, toJSON, toString
+    call, charCodeAt, getUTCDate, getUTCFullYear, getUTCHours,
+    getUTCMinutes, getUTCMonth, getUTCSeconds, hasOwnProperty, join,
+    lastIndex, length, parse, prototype, push, replace, slice, stringify,
+    test, toJSON, toString, valueOf
 */
 
-if (!JSON) var JSON;
-if (!JSON) {
-
 // Create a JSON object only if one does not already exist. We create the
-// object in a closure to avoid global variables.
+// methods in a closure to avoid creating global variables.
 
-    JSON = function () {
+if (!this.JSON) {
+    this.JSON = {};
+}
+(function () {
 
-        function f(n) {    // Format integers to have at least two digits.
-            return n < 10 ? '0' + n : n;
-        }
+    function f(n) {
+        // Format integers to have at least two digits.
+        return n < 10 ? '0' + n : n;
+    }
 
-        Date.prototype.toJSON = function () {
+    if (typeof Date.prototype.toJSON !== 'function') {
 
-// Eventually, this method will be based on the date.toISOString method.
+        Date.prototype.toJSON = function (key) {
 
             return this.getUTCFullYear()   + '-' +
                  f(this.getUTCMonth() + 1) + '-' +
@@ -18318,175 +18320,179 @@ if (!JSON) {
                  f(this.getUTCSeconds())   + 'Z';
         };
 
+        String.prototype.toJSON =
+        Number.prototype.toJSON =
+        Boolean.prototype.toJSON = function (key) {
+            return this.valueOf();
+        };
+    }
 
-        var escapeable = /["\\\x00-\x1f\x7f-\x9f]/g,
-            gap,
-            indent,
-            meta = {    // table of character substitutions
-                '\b': '\\b',
-                '\t': '\\t',
-                '\n': '\\n',
-                '\f': '\\f',
-                '\r': '\\r',
-                '"' : '\\"',
-                '\\': '\\\\'
-            },
-            rep;
+    var cx = /[\u0000\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,
+        escapable = /[\\\"\x00-\x1f\x7f-\x9f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,
+        gap,
+        indent,
+        meta = {    // table of character substitutions
+            '\b': '\\b',
+            '\t': '\\t',
+            '\n': '\\n',
+            '\f': '\\f',
+            '\r': '\\r',
+            '"' : '\\"',
+            '\\': '\\\\'
+        },
+        rep;
 
 
-        function quote(string) {
+    function quote(string) {
 
 // If the string contains no control characters, no quote characters, and no
 // backslash characters, then we can safely slap some quotes around it.
 // Otherwise we must also replace the offending characters with safe escape
 // sequences.
 
-            return escapeable.test(string) ?
-                '"' + string.replace(escapeable, function (a) {
-                    var c = meta[a];
-                    if (typeof c === 'string') {
-                        return c;
-                    }
-                    c = a.charCodeAt();
-                    return '\\u00' + Math.floor(c / 16).toString(16) +
-                                               (c % 16).toString(16);
-                }) + '"' :
-                '"' + string + '"';
-        }
+        escapable.lastIndex = 0;
+        return escapable.test(string) ?
+            '"' + string.replace(escapable, function (a) {
+                var c = meta[a];
+                return typeof c === 'string' ? c :
+                    '\\u' + ('0000' + a.charCodeAt(0).toString(16)).slice(-4);
+            }) + '"' :
+            '"' + string + '"';
+    }
 
 
-        function str(key, holder) {
+    function str(key, holder) {
 
 // Produce a string from holder[key].
 
-            var i,          // The loop counter.
-                k,          // The member key.
-                v,          // The member value.
-                length,
-                mind = gap,
-                partial,
-                value = holder[key];
+        var i,          // The loop counter.
+            k,          // The member key.
+            v,          // The member value.
+            length,
+            mind = gap,
+            partial,
+            value = holder[key];
 
 // If the value has a toJSON method, call it to obtain a replacement value.
 
-            if (value && typeof value === 'object' &&
-                    typeof value.toJSON === 'function') {
-                value = value.toJSON(key);
-            }
+        if (value && typeof value === 'object' &&
+                typeof value.toJSON === 'function') {
+            value = value.toJSON(key);
+        }
 
 // If we were called with a replacer function, then call the replacer to
 // obtain a replacement value.
 
-            if (typeof rep === 'function') {
-                value = rep.call(holder, key, value);
-            }
+        if (typeof rep === 'function') {
+            value = rep.call(holder, key, value);
+        }
 
 // What happens next depends on the value's type.
 
-            switch (typeof value) {
-            case 'string':
-                return quote(value);
+        switch (typeof value) {
+        case 'string':
+            return quote(value);
 
-            case 'number':
+        case 'number':
 
 // JSON numbers must be finite. Encode non-finite numbers as null.
 
-                return isFinite(value) ? String(value) : 'null';
+            return isFinite(value) ? String(value) : 'null';
 
-            case 'boolean':
-            case 'null':
+        case 'boolean':
+        case 'null':
 
 // If the value is a boolean or null, convert it to a string. Note:
 // typeof null does not produce 'null'. The case is included here in
 // the remote chance that this gets fixed someday.
 
-                return String(value);
+            return String(value);
 
 // If the type is 'object', we might be dealing with an object or an array or
 // null.
 
-            case 'object':
+        case 'object':
 
 // Due to a specification blunder in ECMAScript, typeof null is 'object',
 // so watch out for that case.
 
-                if (!value) {
-                    return 'null';
-                }
+            if (!value) {
+                return 'null';
+            }
 
 // Make an array to hold the partial results of stringifying this object value.
 
-                gap += indent;
-                partial = [];
+            gap += indent;
+            partial = [];
 
-// If the object has a dontEnum length property, we'll treat it as an array.
+// Is the value an array?
 
-                if (typeof value.length === 'number' &&
-                        !(value.propertyIsEnumerable('length'))) {
+            if (Object.prototype.toString.apply(value) === '[object Array]') {
 
-// The object is an array. Stringify every element. Use null as a placeholder
+// The value is an array. Stringify every element. Use null as a placeholder
 // for non-JSON values.
 
-                    length = value.length;
-                    for (i = 0; i < length; i += 1) {
-                        partial[i] = str(i, value) || 'null';
-                    }
+                length = value.length;
+                for (i = 0; i < length; i += 1) {
+                    partial[i] = str(i, value) || 'null';
+                }
 
 // Join all of the elements together, separated with commas, and wrap them in
 // brackets.
 
-                    v = partial.length === 0 ? '[]' :
-                        gap ? '[\n' + gap + partial.join(',\n' + gap) +
-                                  '\n' + mind + ']' :
-                              '[' + partial.join(',') + ']';
-                    gap = mind;
-                    return v;
-                }
+                v = partial.length === 0 ? '[]' :
+                    gap ? '[\n' + gap +
+                            partial.join(',\n' + gap) + '\n' +
+                                mind + ']' :
+                          '[' + partial.join(',') + ']';
+                gap = mind;
+                return v;
+            }
 
 // If the replacer is an array, use it to select the members to be stringified.
 
-                if (typeof rep === 'object') {
-                    length = rep.length;
-                    for (i = 0; i < length; i += 1) {
-                        k = rep[i];
-                        if (typeof k === 'string') {
-                            v = str(k, value, rep);
-                            if (v) {
-                                partial.push(quote(k) + (gap ? ': ' : ':') + v);
-                            }
-                        }
-                    }
-                } else {
-
-// Otherwise, iterate through all of the keys in the object.
-
-                    for (k in value) {
-                        v = str(k, value, rep);
+            if (rep && typeof rep === 'object') {
+                length = rep.length;
+                for (i = 0; i < length; i += 1) {
+                    k = rep[i];
+                    if (typeof k === 'string') {
+                        v = str(k, value);
                         if (v) {
                             partial.push(quote(k) + (gap ? ': ' : ':') + v);
                         }
                     }
                 }
+            } else {
+
+// Otherwise, iterate through all of the keys in the object.
+
+                for (k in value) {
+                    if (Object.hasOwnProperty.call(value, k)) {
+                        v = str(k, value);
+                        if (v) {
+                            partial.push(quote(k) + (gap ? ': ' : ':') + v);
+                        }
+                    }
+                }
+            }
 
 // Join all of the member texts together, separated with commas,
 // and wrap them in braces.
 
-                v = partial.length === 0 ? '{}' :
-                    gap ? '{\n' + gap + partial.join(',\n' + gap) +
-                              '\n' + mind + '}' :
-                          '{' + partial.join(',') + '}';
-                gap = mind;
-                return v;
-            }
-
-            return null;
+            v = partial.length === 0 ? '{}' :
+                gap ? '{\n' + gap + partial.join(',\n' + gap) + '\n' +
+                        mind + '}' : '{' + partial.join(',') + '}';
+            gap = mind;
+            return v;
         }
 
+        return '';
+    }
 
-// Return the JSON object containing the stringify, parse, and quote methods.
+// If the JSON object does not yet have a stringify method, give it one.
 
-        return {
-            stringify: function (value, replacer, space) {
+    if (typeof JSON.stringify !== 'function') {
+        JSON.stringify = function (value, replacer, space) {
 
 // The stringify method takes a value and an optional replacer, and an optional
 // space parameter, and returns a JSON text. The replacer can be a function
@@ -18494,123 +18500,124 @@ if (!JSON) {
 // A default replacer method can be provided. Use of the space parameter can
 // produce text that is more easily readable.
 
-                var i;
-                gap = '';
-                indent = '';
-                if (space) {
+            var i;
+            gap = '';
+            indent = '';
 
 // If the space parameter is a number, make an indent string containing that
 // many spaces.
 
-                    if (typeof space === 'number') {
-                        for (i = 0; i < space; i += 1) {
-                            indent += ' ';
-                        }
+            if (typeof space === 'number') {
+                for (i = 0; i < space; i += 1) {
+                    indent += ' ';
+                }
 
 // If the space parameter is a string, it will be used as the indent string.
 
-                    } else if (typeof space === 'string') {
-                        indent = space;
-                    }
-                }
+            } else if (typeof space === 'string') {
+                indent = space;
+            }
 
-// If there is no replacer parameter, use the default replacer.
+// If there is a replacer, it must be a function or an array.
+// Otherwise, throw an error.
 
-                if (!replacer) {
-                    rep = function (key, value) {
-                        if (!Object.hasOwnProperty.call(this, key)) {
-                            return undefined;
-                        }
-                        return value;
-                    };
-
-// The replacer can be a function or an array. Otherwise, throw an error.
-
-                } else if (typeof replacer === 'function' ||
-                        (typeof replacer === 'object' &&
-                         typeof replacer.length === 'number')) {
-                    rep = replacer;
-                } else {
-                    throw new Error('JSON.stringify');
-                }
+            rep = replacer;
+            if (replacer && typeof replacer !== 'function' &&
+                    (typeof replacer !== 'object' ||
+                     typeof replacer.length !== 'number')) {
+                throw new Error('JSON.stringify');
+            }
 
 // Make a fake root object containing our value under the key of ''.
 // Return the result of stringifying the value.
 
-                return str('', {'': value});
-            },
+            return str('', {'': value});
+        };
+    }
 
 
-            parse: function (text, reviver) {
+// If the JSON object does not yet have a parse method, give it one.
+
+    if (typeof JSON.parse !== 'function') {
+        JSON.parse = function (text, reviver) {
 
 // The parse method takes a text and an optional reviver function, and returns
 // a JavaScript value if the text is a valid JSON text.
 
-                var j;
+            var j;
 
-                function walk(holder, key) {
+            function walk(holder, key) {
 
 // The walk method is used to recursively walk the resulting structure so
 // that modifications can be made.
 
-                    var k, v, value = holder[key];
-                    if (value && typeof value === 'object') {
-                        for (k in value) {
-                            if (Object.hasOwnProperty.call(value, k)) {
-                                v = walk(value, k);
-                                if (v !== undefined) {
-                                    value[k] = v;
-                                } else {
-                                    delete value[k];
-                                }
+                var k, v, value = holder[key];
+                if (value && typeof value === 'object') {
+                    for (k in value) {
+                        if (Object.hasOwnProperty.call(value, k)) {
+                            v = walk(value, k);
+                            if (v !== undefined) {
+                                value[k] = v;
+                            } else {
+                                delete value[k];
                             }
                         }
                     }
-                    return reviver.call(holder, key, value);
                 }
+                return reviver.call(holder, key, value);
+            }
 
 
-// Parsing happens in three stages. In the first stage, we run the text against
-// regular expressions that look for non-JSON patterns. We are especially
-// concerned with '()' and 'new' because they can cause invocation, and '='
-// because it can cause mutation. But just to be safe, we want to reject all
-// unexpected forms.
+// Parsing happens in four stages. In the first stage, we replace certain
+// Unicode characters with escape sequences. JavaScript handles many characters
+// incorrectly, either silently deleting them, or treating them as line endings.
 
-// We split the first stage into 4 regexp operations in order to work around
+            cx.lastIndex = 0;
+            if (cx.test(text)) {
+                text = text.replace(cx, function (a) {
+                    return '\\u' +
+                        ('0000' + a.charCodeAt(0).toString(16)).slice(-4);
+                });
+            }
+
+// In the second stage, we run the text against regular expressions that look
+// for non-JSON patterns. We are especially concerned with '()' and 'new'
+// because they can cause invocation, and '=' because it can cause mutation.
+// But just to be safe, we want to reject all unexpected forms.
+
+// We split the second stage into 4 regexp operations in order to work around
 // crippling inefficiencies in IE's and Safari's regexp engines. First we
-// replace all backslash pairs with '@' (a non-JSON character). Second, we
+// replace the JSON backslash pairs with '@' (a non-JSON character). Second, we
 // replace all simple value tokens with ']' characters. Third, we delete all
 // open brackets that follow a colon or comma or that begin the text. Finally,
 // we look to see that the remaining characters are only whitespace or ']' or
 // ',' or ':' or '{' or '}'. If that is so, then the text is safe for eval.
 
-                if (/^[\],:{}\s]*$/.test(text.replace(/\\["\\\/bfnrtu]/g, '@').
+            if (/^[\],:{}\s]*$/.
+test(text.replace(/\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4})/g, '@').
 replace(/"[^"\\\n\r]*"|true|false|null|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g, ']').
 replace(/(?:^|:|,)(?:\s*\[)+/g, ''))) {
 
-// In the second stage we use the eval function to compile the text into a
+// In the third stage we use the eval function to compile the text into a
 // JavaScript structure. The '{' operator is subject to a syntactic ambiguity
 // in JavaScript: it can begin a block or an object literal. We wrap the text
 // in parens to eliminate the ambiguity.
 
-                    j = eval('(' + text + ')');
+                j = eval('(' + text + ')');
 
-// In the optional third stage, we recursively walk the new structure, passing
+// In the optional fourth stage, we recursively walk the new structure, passing
 // each name/value pair to a reviver function for possible transformation.
 
-                    return typeof reviver === 'function' ?
-                        walk({'': j}, '') : j;
-                }
+                return typeof reviver === 'function' ?
+                    walk({'': j}, '') : j;
+            }
 
 // If the text is not JSON parseable, then a SyntaxError is thrown.
 
-                throw new SyntaxError('JSON.parse');
-            },
-
-            quote: quote
+            throw new SyntaxError('JSON.parse');
         };
-    }();
-}
+    }
+}());
 
 
 Jemplate.JSON = {
@@ -18654,8 +18661,8 @@ Jemplate.JSON = {
 sub json2 {
     <<'...';
 /*
-    json2.js
-    2008-03-24
+    http://www.JSON.org/json2.js
+    2009-04-16
 
     Public Domain.
 
@@ -18663,44 +18670,48 @@ sub json2 {
 
     See http://www.JSON.org/js.html
 
-    This file creates a global JSON object containing three methods: stringify,
-    parse, and quote.
-
+    This file creates a global JSON object containing two methods: stringify
+    and parse.
 
         JSON.stringify(value, replacer, space)
             value       any JavaScript value, usually an object or array.
 
             replacer    an optional parameter that determines how object
-                        values are stringified for objects without a toJSON
-                        method. It can be a function or an array.
+                        values are stringified for objects. It can be a
+                        function or an array of strings.
 
             space       an optional parameter that specifies the indentation
                         of nested structures. If it is omitted, the text will
                         be packed without extra whitespace. If it is a number,
                         it will specify the number of spaces to indent at each
-                        level. If it is a string (such as '\t'), it contains the
-                        characters used to indent at each level.
+                        level. If it is a string (such as '\t' or '&nbsp;'),
+                        it contains the characters used to indent at each level.
 
             This method produces a JSON text from a JavaScript value.
 
             When an object value is found, if the object contains a toJSON
-            method, its toJSON method with be called and the result will be
+            method, its toJSON method will be called and the result will be
             stringified. A toJSON method does not serialize: it returns the
             value represented by the name/value pair that should be serialized,
-            or undefined if nothing should be serialized. The toJSON method will
-            be passed the key associated with the value, and this will be bound
-            to the object holding the key.
+            or undefined if nothing should be serialized. The toJSON method
+            will be passed the key associated with the value, and this will be
+            bound to the object holding the key.
 
-            This is the toJSON method added to Dates:
+            For example, this would serialize Dates as ISO strings.
 
-                function toJSON(key) {
+                Date.prototype.toJSON = function (key) {
+                    function f(n) {
+                        // Format integers to have at least two digits.
+                        return n < 10 ? '0' + n : n;
+                    }
+
                     return this.getUTCFullYear()   + '-' +
                          f(this.getUTCMonth() + 1) + '-' +
                          f(this.getUTCDate())      + 'T' +
                          f(this.getUTCHours())     + ':' +
                          f(this.getUTCMinutes())   + ':' +
                          f(this.getUTCSeconds())   + 'Z';
-                }
+                };
 
             You can provide an optional replacer method. It will be passed the
             key and value of each member, with this bound to the containing
@@ -18708,35 +18719,24 @@ sub json2 {
             serialized. If your method returns undefined, then the member will
             be excluded from the serialization.
 
-            If no replacer parameter is provided, then a default replacer
-            will be used:
-
-                function replacer(key, value) {
-                    return Object.hasOwnProperty.call(this, key) ?
-                        value : undefined;
-                }
-
-            The default replacer is passed the key and value for each item in
-            the structure. It excludes inherited members.
-
-            If the replacer parameter is an array, then it will be used to
-            select the members to be serialized. It filters the results such
-            that only members with keys listed in the replacer array are
+            If the replacer parameter is an array of strings, then it will be
+            used to select the members to be serialized. It filters the results
+            such that only members with keys listed in the replacer array are
             stringified.
 
-            Values that do not have JSON representaions, such as undefined or
+            Values that do not have JSON representations, such as undefined or
             functions, will not be serialized. Such values in objects will be
             dropped; in arrays they will be replaced with null. You can use
             a replacer function to replace those with JSON values.
             JSON.stringify(undefined) returns undefined.
 
-            The optional space parameter produces a stringification of the value
-            that is filled with line breaks and indentation to make it easier to
-            read.
+            The optional space parameter produces a stringification of the
+            value that is filled with line breaks and indentation to make it
+            easier to read.
 
             If the space parameter is a non-empty string, then that string will
             be used for indentation. If the space parameter is a number, then
-            then indentation will be that many spaces.
+            the indentation will be that many spaces.
 
             Example:
 
@@ -18747,16 +18747,22 @@ sub json2 {
             text = JSON.stringify(['e', {pluribus: 'unum'}], null, '\t');
             // text is '[\n\t"e",\n\t{\n\t\t"pluribus": "unum"\n\t}\n]'
 
+            text = JSON.stringify([new Date()], function (key, value) {
+                return this[key] instanceof Date ?
+                    'Date(' + this[key] + ')' : value;
+            });
+            // text is '["Date(---current time---)"]'
+
 
         JSON.parse(text, reviver)
             This method parses a JSON text to produce an object or array.
             It can throw a SyntaxError exception.
 
             The optional reviver parameter is a function that can filter and
-            transform the results. It receives each of the keys and values, and
-            its return value is used instead of the original value. If it
-            returns what it received, then structure is not modified. If it
-            returns undefined then the member is deleted.
+            transform the results. It receives each of the keys and values,
+            and its return value is used instead of the original value.
+            If it returns what it received, then the structure is not modified.
+            If it returns undefined then the member is deleted.
 
             Example:
 
@@ -18776,45 +18782,57 @@ sub json2 {
                 return value;
             });
 
-
-        JSON.quote(text)
-            This method wraps a string in quotes, escaping some characters
-            as needed.
+            myData = JSON.parse('["Date(09/09/2001)"]', function (key, value) {
+                var d;
+                if (typeof value === 'string' &&
+                        value.slice(0, 5) === 'Date(' &&
+                        value.slice(-1) === ')') {
+                    d = new Date(value.slice(5, -1));
+                    if (d) {
+                        return d;
+                    }
+                }
+                return value;
+            });
 
 
     This is a reference implementation. You are free to copy, modify, or
     redistribute.
 
-    USE YOUR OWN COPY. IT IS EXTREMELY UNWISE TO LOAD THIRD PARTY
-    CODE INTO YOUR PAGES.
+    This code should be minified before deployment.
+    See http://javascript.crockford.com/jsmin.html
+
+    USE YOUR OWN COPY. IT IS EXTREMELY UNWISE TO LOAD CODE FROM SERVERS YOU DO
+    NOT CONTROL.
 */
 
-/*jslint regexp: true, forin: true, evil: true */
+/*jslint evil: true */
 
 /*global JSON */
 
 /*members "", "\b", "\t", "\n", "\f", "\r", "\"", JSON, "\\", apply,
-    call, charCodeAt, floor, getUTCDate, getUTCFullYear, getUTCHours,
-    getUTCMinutes, getUTCMonth, getUTCSeconds, hasOwnProperty, join, length,
-    parse, propertyIsEnumerable, prototype, push, quote, replace, stringify,
-    test, toJSON, toString
+    call, charCodeAt, getUTCDate, getUTCFullYear, getUTCHours,
+    getUTCMinutes, getUTCMonth, getUTCSeconds, hasOwnProperty, join,
+    lastIndex, length, parse, prototype, push, replace, slice, stringify,
+    test, toJSON, toString, valueOf
 */
 
-if (!JSON) var JSON;
-if (!JSON) {
-
 // Create a JSON object only if one does not already exist. We create the
-// object in a closure to avoid global variables.
+// methods in a closure to avoid creating global variables.
 
-    JSON = function () {
+if (!this.JSON) {
+    this.JSON = {};
+}
+(function () {
 
-        function f(n) {    // Format integers to have at least two digits.
-            return n < 10 ? '0' + n : n;
-        }
+    function f(n) {
+        // Format integers to have at least two digits.
+        return n < 10 ? '0' + n : n;
+    }
 
-        Date.prototype.toJSON = function () {
+    if (typeof Date.prototype.toJSON !== 'function') {
 
-// Eventually, this method will be based on the date.toISOString method.
+        Date.prototype.toJSON = function (key) {
 
             return this.getUTCFullYear()   + '-' +
                  f(this.getUTCMonth() + 1) + '-' +
@@ -18824,175 +18842,179 @@ if (!JSON) {
                  f(this.getUTCSeconds())   + 'Z';
         };
 
+        String.prototype.toJSON =
+        Number.prototype.toJSON =
+        Boolean.prototype.toJSON = function (key) {
+            return this.valueOf();
+        };
+    }
 
-        var escapeable = /["\\\x00-\x1f\x7f-\x9f]/g,
-            gap,
-            indent,
-            meta = {    // table of character substitutions
-                '\b': '\\b',
-                '\t': '\\t',
-                '\n': '\\n',
-                '\f': '\\f',
-                '\r': '\\r',
-                '"' : '\\"',
-                '\\': '\\\\'
-            },
-            rep;
+    var cx = /[\u0000\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,
+        escapable = /[\\\"\x00-\x1f\x7f-\x9f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,
+        gap,
+        indent,
+        meta = {    // table of character substitutions
+            '\b': '\\b',
+            '\t': '\\t',
+            '\n': '\\n',
+            '\f': '\\f',
+            '\r': '\\r',
+            '"' : '\\"',
+            '\\': '\\\\'
+        },
+        rep;
 
 
-        function quote(string) {
+    function quote(string) {
 
 // If the string contains no control characters, no quote characters, and no
 // backslash characters, then we can safely slap some quotes around it.
 // Otherwise we must also replace the offending characters with safe escape
 // sequences.
 
-            return escapeable.test(string) ?
-                '"' + string.replace(escapeable, function (a) {
-                    var c = meta[a];
-                    if (typeof c === 'string') {
-                        return c;
-                    }
-                    c = a.charCodeAt();
-                    return '\\u00' + Math.floor(c / 16).toString(16) +
-                                               (c % 16).toString(16);
-                }) + '"' :
-                '"' + string + '"';
-        }
+        escapable.lastIndex = 0;
+        return escapable.test(string) ?
+            '"' + string.replace(escapable, function (a) {
+                var c = meta[a];
+                return typeof c === 'string' ? c :
+                    '\\u' + ('0000' + a.charCodeAt(0).toString(16)).slice(-4);
+            }) + '"' :
+            '"' + string + '"';
+    }
 
 
-        function str(key, holder) {
+    function str(key, holder) {
 
 // Produce a string from holder[key].
 
-            var i,          // The loop counter.
-                k,          // The member key.
-                v,          // The member value.
-                length,
-                mind = gap,
-                partial,
-                value = holder[key];
+        var i,          // The loop counter.
+            k,          // The member key.
+            v,          // The member value.
+            length,
+            mind = gap,
+            partial,
+            value = holder[key];
 
 // If the value has a toJSON method, call it to obtain a replacement value.
 
-            if (value && typeof value === 'object' &&
-                    typeof value.toJSON === 'function') {
-                value = value.toJSON(key);
-            }
+        if (value && typeof value === 'object' &&
+                typeof value.toJSON === 'function') {
+            value = value.toJSON(key);
+        }
 
 // If we were called with a replacer function, then call the replacer to
 // obtain a replacement value.
 
-            if (typeof rep === 'function') {
-                value = rep.call(holder, key, value);
-            }
+        if (typeof rep === 'function') {
+            value = rep.call(holder, key, value);
+        }
 
 // What happens next depends on the value's type.
 
-            switch (typeof value) {
-            case 'string':
-                return quote(value);
+        switch (typeof value) {
+        case 'string':
+            return quote(value);
 
-            case 'number':
+        case 'number':
 
 // JSON numbers must be finite. Encode non-finite numbers as null.
 
-                return isFinite(value) ? String(value) : 'null';
+            return isFinite(value) ? String(value) : 'null';
 
-            case 'boolean':
-            case 'null':
+        case 'boolean':
+        case 'null':
 
 // If the value is a boolean or null, convert it to a string. Note:
 // typeof null does not produce 'null'. The case is included here in
 // the remote chance that this gets fixed someday.
 
-                return String(value);
+            return String(value);
 
 // If the type is 'object', we might be dealing with an object or an array or
 // null.
 
-            case 'object':
+        case 'object':
 
 // Due to a specification blunder in ECMAScript, typeof null is 'object',
 // so watch out for that case.
 
-                if (!value) {
-                    return 'null';
-                }
+            if (!value) {
+                return 'null';
+            }
 
 // Make an array to hold the partial results of stringifying this object value.
 
-                gap += indent;
-                partial = [];
+            gap += indent;
+            partial = [];
 
-// If the object has a dontEnum length property, we'll treat it as an array.
+// Is the value an array?
 
-                if (typeof value.length === 'number' &&
-                        !(value.propertyIsEnumerable('length'))) {
+            if (Object.prototype.toString.apply(value) === '[object Array]') {
 
-// The object is an array. Stringify every element. Use null as a placeholder
+// The value is an array. Stringify every element. Use null as a placeholder
 // for non-JSON values.
 
-                    length = value.length;
-                    for (i = 0; i < length; i += 1) {
-                        partial[i] = str(i, value) || 'null';
-                    }
+                length = value.length;
+                for (i = 0; i < length; i += 1) {
+                    partial[i] = str(i, value) || 'null';
+                }
 
 // Join all of the elements together, separated with commas, and wrap them in
 // brackets.
 
-                    v = partial.length === 0 ? '[]' :
-                        gap ? '[\n' + gap + partial.join(',\n' + gap) +
-                                  '\n' + mind + ']' :
-                              '[' + partial.join(',') + ']';
-                    gap = mind;
-                    return v;
-                }
+                v = partial.length === 0 ? '[]' :
+                    gap ? '[\n' + gap +
+                            partial.join(',\n' + gap) + '\n' +
+                                mind + ']' :
+                          '[' + partial.join(',') + ']';
+                gap = mind;
+                return v;
+            }
 
 // If the replacer is an array, use it to select the members to be stringified.
 
-                if (typeof rep === 'object') {
-                    length = rep.length;
-                    for (i = 0; i < length; i += 1) {
-                        k = rep[i];
-                        if (typeof k === 'string') {
-                            v = str(k, value, rep);
-                            if (v) {
-                                partial.push(quote(k) + (gap ? ': ' : ':') + v);
-                            }
-                        }
-                    }
-                } else {
-
-// Otherwise, iterate through all of the keys in the object.
-
-                    for (k in value) {
-                        v = str(k, value, rep);
+            if (rep && typeof rep === 'object') {
+                length = rep.length;
+                for (i = 0; i < length; i += 1) {
+                    k = rep[i];
+                    if (typeof k === 'string') {
+                        v = str(k, value);
                         if (v) {
                             partial.push(quote(k) + (gap ? ': ' : ':') + v);
                         }
                     }
                 }
+            } else {
+
+// Otherwise, iterate through all of the keys in the object.
+
+                for (k in value) {
+                    if (Object.hasOwnProperty.call(value, k)) {
+                        v = str(k, value);
+                        if (v) {
+                            partial.push(quote(k) + (gap ? ': ' : ':') + v);
+                        }
+                    }
+                }
+            }
 
 // Join all of the member texts together, separated with commas,
 // and wrap them in braces.
 
-                v = partial.length === 0 ? '{}' :
-                    gap ? '{\n' + gap + partial.join(',\n' + gap) +
-                              '\n' + mind + '}' :
-                          '{' + partial.join(',') + '}';
-                gap = mind;
-                return v;
-            }
-
-            return null;
+            v = partial.length === 0 ? '{}' :
+                gap ? '{\n' + gap + partial.join(',\n' + gap) + '\n' +
+                        mind + '}' : '{' + partial.join(',') + '}';
+            gap = mind;
+            return v;
         }
 
+        return '';
+    }
 
-// Return the JSON object containing the stringify, parse, and quote methods.
+// If the JSON object does not yet have a stringify method, give it one.
 
-        return {
-            stringify: function (value, replacer, space) {
+    if (typeof JSON.stringify !== 'function') {
+        JSON.stringify = function (value, replacer, space) {
 
 // The stringify method takes a value and an optional replacer, and an optional
 // space parameter, and returns a JSON text. The replacer can be a function
@@ -19000,123 +19022,124 @@ if (!JSON) {
 // A default replacer method can be provided. Use of the space parameter can
 // produce text that is more easily readable.
 
-                var i;
-                gap = '';
-                indent = '';
-                if (space) {
+            var i;
+            gap = '';
+            indent = '';
 
 // If the space parameter is a number, make an indent string containing that
 // many spaces.
 
-                    if (typeof space === 'number') {
-                        for (i = 0; i < space; i += 1) {
-                            indent += ' ';
-                        }
+            if (typeof space === 'number') {
+                for (i = 0; i < space; i += 1) {
+                    indent += ' ';
+                }
 
 // If the space parameter is a string, it will be used as the indent string.
 
-                    } else if (typeof space === 'string') {
-                        indent = space;
-                    }
-                }
+            } else if (typeof space === 'string') {
+                indent = space;
+            }
 
-// If there is no replacer parameter, use the default replacer.
+// If there is a replacer, it must be a function or an array.
+// Otherwise, throw an error.
 
-                if (!replacer) {
-                    rep = function (key, value) {
-                        if (!Object.hasOwnProperty.call(this, key)) {
-                            return undefined;
-                        }
-                        return value;
-                    };
-
-// The replacer can be a function or an array. Otherwise, throw an error.
-
-                } else if (typeof replacer === 'function' ||
-                        (typeof replacer === 'object' &&
-                         typeof replacer.length === 'number')) {
-                    rep = replacer;
-                } else {
-                    throw new Error('JSON.stringify');
-                }
+            rep = replacer;
+            if (replacer && typeof replacer !== 'function' &&
+                    (typeof replacer !== 'object' ||
+                     typeof replacer.length !== 'number')) {
+                throw new Error('JSON.stringify');
+            }
 
 // Make a fake root object containing our value under the key of ''.
 // Return the result of stringifying the value.
 
-                return str('', {'': value});
-            },
+            return str('', {'': value});
+        };
+    }
 
 
-            parse: function (text, reviver) {
+// If the JSON object does not yet have a parse method, give it one.
+
+    if (typeof JSON.parse !== 'function') {
+        JSON.parse = function (text, reviver) {
 
 // The parse method takes a text and an optional reviver function, and returns
 // a JavaScript value if the text is a valid JSON text.
 
-                var j;
+            var j;
 
-                function walk(holder, key) {
+            function walk(holder, key) {
 
 // The walk method is used to recursively walk the resulting structure so
 // that modifications can be made.
 
-                    var k, v, value = holder[key];
-                    if (value && typeof value === 'object') {
-                        for (k in value) {
-                            if (Object.hasOwnProperty.call(value, k)) {
-                                v = walk(value, k);
-                                if (v !== undefined) {
-                                    value[k] = v;
-                                } else {
-                                    delete value[k];
-                                }
+                var k, v, value = holder[key];
+                if (value && typeof value === 'object') {
+                    for (k in value) {
+                        if (Object.hasOwnProperty.call(value, k)) {
+                            v = walk(value, k);
+                            if (v !== undefined) {
+                                value[k] = v;
+                            } else {
+                                delete value[k];
                             }
                         }
                     }
-                    return reviver.call(holder, key, value);
                 }
+                return reviver.call(holder, key, value);
+            }
 
 
-// Parsing happens in three stages. In the first stage, we run the text against
-// regular expressions that look for non-JSON patterns. We are especially
-// concerned with '()' and 'new' because they can cause invocation, and '='
-// because it can cause mutation. But just to be safe, we want to reject all
-// unexpected forms.
+// Parsing happens in four stages. In the first stage, we replace certain
+// Unicode characters with escape sequences. JavaScript handles many characters
+// incorrectly, either silently deleting them, or treating them as line endings.
 
-// We split the first stage into 4 regexp operations in order to work around
+            cx.lastIndex = 0;
+            if (cx.test(text)) {
+                text = text.replace(cx, function (a) {
+                    return '\\u' +
+                        ('0000' + a.charCodeAt(0).toString(16)).slice(-4);
+                });
+            }
+
+// In the second stage, we run the text against regular expressions that look
+// for non-JSON patterns. We are especially concerned with '()' and 'new'
+// because they can cause invocation, and '=' because it can cause mutation.
+// But just to be safe, we want to reject all unexpected forms.
+
+// We split the second stage into 4 regexp operations in order to work around
 // crippling inefficiencies in IE's and Safari's regexp engines. First we
-// replace all backslash pairs with '@' (a non-JSON character). Second, we
+// replace the JSON backslash pairs with '@' (a non-JSON character). Second, we
 // replace all simple value tokens with ']' characters. Third, we delete all
 // open brackets that follow a colon or comma or that begin the text. Finally,
 // we look to see that the remaining characters are only whitespace or ']' or
 // ',' or ':' or '{' or '}'. If that is so, then the text is safe for eval.
 
-                if (/^[\],:{}\s]*$/.test(text.replace(/\\["\\\/bfnrtu]/g, '@').
+            if (/^[\],:{}\s]*$/.
+test(text.replace(/\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4})/g, '@').
 replace(/"[^"\\\n\r]*"|true|false|null|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g, ']').
 replace(/(?:^|:|,)(?:\s*\[)+/g, ''))) {
 
-// In the second stage we use the eval function to compile the text into a
+// In the third stage we use the eval function to compile the text into a
 // JavaScript structure. The '{' operator is subject to a syntactic ambiguity
 // in JavaScript: it can begin a block or an object literal. We wrap the text
 // in parens to eliminate the ambiguity.
 
-                    j = eval('(' + text + ')');
+                j = eval('(' + text + ')');
 
-// In the optional third stage, we recursively walk the new structure, passing
+// In the optional fourth stage, we recursively walk the new structure, passing
 // each name/value pair to a reviver function for possible transformation.
 
-                    return typeof reviver === 'function' ?
-                        walk({'': j}, '') : j;
-                }
+                return typeof reviver === 'function' ?
+                    walk({'': j}, '') : j;
+            }
 
 // If the text is not JSON parseable, then a SyntaxError is thrown.
 
-                throw new SyntaxError('JSON.parse');
-            },
-
-            quote: quote
+            throw new SyntaxError('JSON.parse');
         };
-    }();
-}
+    }
+}());
 
 ...
 }
@@ -19725,7 +19748,7 @@ use warnings;
 sub main { return &kernel }
 sub kernel {
     <<'...';
-if(typeof Jemplate=="undefined"){var Jemplate=function(){this.init.apply(this,arguments)}}Jemplate.VERSION="0.22";Jemplate.process=function(){var A=new Jemplate(Jemplate.prototype.config);return A.process.apply(A,arguments)};(function(){if(!Jemplate.templateMap){Jemplate.templateMap={}}var proto=Jemplate.prototype={};proto.config={AUTO_RESET:true,BLOCKS:{},CONTEXT:null,DEBUG_UNDEF:false,DEFAULT:null,ERROR:null,EVAL_JAVASCRIPT:false,GLOBAL:true,SCOPE:this,FILTERS:{},INCLUDE_PATH:[""],INTERPOLATE:false,OUTPUT:null,PLUGINS:{},POST_PROCESS:[],PRE_PROCESS:[],PROCESS:null,RECURSION:false,STASH:null,TOLERANT:null,VARIABLES:{},WRAPPER:[]};proto.defaults={AUTO_RESET:true,BLOCKS:{},CONTEXT:null,DEBUG_UNDEF:false,DEFAULT:null,ERROR:null,EVAL_JAVASCRIPT:false,GLOBAL:true,SCOPE:this,INCLUDE_PATH:[""],INTERPOLATE:false,OUTPUT:null,PLUGINS:{},POST_PROCESS:[],PRE_PROCESS:[],PROCESS:null,RECURSION:false,STASH:null,TOLERANT:null,VARIABLES:{},WRAPPER:[]};Jemplate.init=function(config){Jemplate.prototype.config=config||{};for(var i in Jemplate.prototype.defaults){if(typeof Jemplate.prototype.config[i]=="undefined"){Jemplate.prototype.config[i]=Jemplate.prototype.defaults[i]}}};proto.init=function(config){this.config=config||{};for(var i in Jemplate.prototype.defaults){if(typeof this.config[i]=="undefined"){this.config[i]=Jemplate.prototype.defaults[i]}}};proto.process=function(template,data,output){var context=this.config.CONTEXT||new Jemplate.Context();context.config=this.config;context.stash=new Jemplate.Stash(this.config.STASH,this.config);context.__filter__=new Jemplate.Filter();context.__filter__.config=this.config;context.__plugin__=new Jemplate.Plugin();context.__plugin__.config=this.config;var result;var proc=function(input){try{if(typeof context.config.PRE_PROCESS=="string"){context.config.PRE_PROCESS=[context.config.PRE_PROCESS]}for(var i=0;i<context.config.PRE_PROCESS.length;i++){context.process(context.config.PRE_PROCESS[i])}result=context.process(template,input);if(typeof context.config.POST_PROCESS=="string"){context.config.PRE_PROCESS=[context.config.POST_PROCESS]}for(i=0;i<context.config.POST_PROCESS.length;i++){context.process(context.config.POST_PROCESS[i])}}catch(e){if(!String(e).match(/Jemplate\.STOP\n/)){throw (e)}result=e.toString().replace(/Jemplate\.STOP\n/,"")}if(typeof output=="undefined"){return result}if(typeof output=="function"){output(result);return null}if(typeof (output)=="string"||output instanceof String){if(output.match(/^#[\w\-]+$/)){var id=output.replace(/^#/,"");var element=document.getElementById(id);if(typeof element=="undefined"){throw ('No element found with id="'+id+'"')}element.innerHTML=result;return null}}else{output.innerHTML=result;return null}throw ("Invalid arguments in call to Jemplate.process");return 1};if(typeof data=="function"){data=data()}else{if(typeof data=="string"){var url=data;Jemplate.Ajax.processGet(url,function(data){proc(data)});return null}}return proc(data)};if(typeof Jemplate.Context=="undefined"){Jemplate.Context=function(){}}proto=Jemplate.Context.prototype;proto.include=function(template,args){return this.process(template,args,true)};proto.process=function(template,args,localise){if(localise){this.stash.clone(args)}else{this.stash.update(args)}var func=Jemplate.templateMap[template];if(typeof func=="undefined"){throw ('No Jemplate template named "'+template+'" available')}var output=func(this);if(localise){this.stash.declone()}return output};proto.set_error=function(error,output){this._error=[error,output];return error};proto.plugin=function(name,args){if(typeof name=="undefined"){throw"Unknown plugin name ':"+name+"'"}var func=eval(name);return new func(this,args)};proto.filter=function(text,name,args){if(name=="null"){name="null_filter"}if(typeof this.__filter__.filters[name]=="function"){return this.__filter__.filters[name](text,args,this)}else{throw"Unknown filter name ':"+name+"'"}};if(typeof Jemplate.Plugin=="undefined"){Jemplate.Plugin=function(){}}proto=Jemplate.Plugin.prototype;proto.plugins={};if(typeof Jemplate.Filter=="undefined"){Jemplate.Filter=function(){}}proto=Jemplate.Filter.prototype;proto.filters={};proto.filters.null_filter=function(text){return""};proto.filters.upper=function(text){return text.toUpperCase()};proto.filters.lower=function(text){return text.toLowerCase()};proto.filters.ucfirst=function(text){var first=text.charAt(0);var rest=text.substr(1);return first.toUpperCase()+rest};proto.filters.lcfirst=function(text){var first=text.charAt(0);var rest=text.substr(1);return first.toLowerCase()+rest};proto.filters.trim=function(text){return text.replace(/^\s+/g,"").replace(/\s+$/g,"")};proto.filters.collapse=function(text){return text.replace(/^\s+/g,"").replace(/\s+$/g,"").replace(/\s+/," ")};proto.filters.html=function(text){text=text.replace(/&/g,"&amp;");text=text.replace(/</g,"&lt;");text=text.replace(/>/g,"&gt;");text=text.replace(/"/g,"&quot;");return text};proto.filters.html_para=function(text){var lines=text.split(/(?:\r?\n){2,}/);return"<p>\n"+lines.join("\n</p>\n\n<p>\n")+"</p>\n"};proto.filters.html_break=function(text){return text.replace(/(\r?\n){2,}/g,"$1<br />$1<br />$1")};proto.filters.html_line_break=function(text){return text.replace(/(\r?\n)/g,"$1<br />$1")};proto.filters.uri=function(text){return encodeURIComponent(text)};proto.filters.url=function(text){return encodeURI(text)};proto.filters.indent=function(text,args){var pad=args[0];if(!text){return null}if(typeof pad=="undefined"){pad=4}var finalpad="";if(typeof pad=="number"||String(pad).match(/^\d$/)){for(var i=0;i<pad;i++){finalpad+=" "}}else{finalpad=pad}var output=text.replace(/^/gm,finalpad);return output};proto.filters.truncate=function(text,args){var len=args[0];if(!text){return null}if(!len){len=32}if(text.length<len){return text}var newlen=len-3;return text.substr(0,newlen)+"..."};proto.filters.repeat=function(text,iter){if(!text){return null}if(!iter||iter==0){iter=1}if(iter==1){return text}var output=text;for(var i=1;i<iter;i++){output+=text}return output};proto.filters.replace=function(text,args){if(!text){return null}var re_search=args[0];var text_replace=args[1];if(!re_search){re_search=""}if(!text_replace){text_replace=""}var re=new RegExp(re_search,"g");return text.replace(re,text_replace)};if(typeof Jemplate.Stash=="undefined"){Jemplate.Stash=function(stash,config){this.__config__=config;this.data={GLOBAL:this.__config__.SCOPE};this.LOCAL_ANCHOR={};this.data.LOCAL=this.LOCAL_ANCHOR;this.update(stash)}}proto=Jemplate.Stash.prototype;proto.clone=function(args){var data=this.data;this.data={GLOBAL:this.__config__.SCOPE};this.data.LOCAL=this.LOCAL_ANCHOR;this.update(data);this.update(args);this.data._PARENT=data};proto.declone=function(args){this.data=this.data._PARENT||this.data};proto.update=function(args){if(typeof args=="undefined"){return }for(var key in args){if(key!="GLOBAL"&&key!="LOCAL"){this.set(key,args[key])}}};proto.get=function(ident,args){var root=this.data;var value;if((ident instanceof Array)||(typeof ident=="string"&&/\./.test(ident))){if(typeof ident=="string"){ident=ident.split(".");var newIdent=[];for(var i=0;i<ident.length;i++){newIdent.push(ident.replace(/\(.*$/,""));newIdent.push(0)}ident=newIdent}for(var i=0;i<ident.length;i+=2){var dotopArgs=ident.slice(i,i+2);dotopArgs.unshift(root);value=this._dotop.apply(this,dotopArgs);if(typeof value=="undefined"){break}root=value}}else{value=this._dotop(root,ident,args)}if(typeof value=="undefined"||value==null){if(this.__config__.DEBUG_UNDEF){throw ("undefined value found while using DEBUG_UNDEF")}value=""}return value};proto.set=function(ident,value,set_default){var root,result,error;root=this.data;while(true){if((ident instanceof Array)||(typeof ident=="string"&&/\./.test(ident))){if(typeof ident=="string"){ident=ident.split(".");var newIdent=[];for(var i=0;i<ident.length;i++){newIdent.push(ident.replace(/\(.*$/,""));newIdent.push(0)}ident=newIdent}for(var i=0;i<ident.length-2;i+=2){var dotopArgs=ident.slice(i,i+2);dotopArgs.unshift(root);dotopArgs.push(1);result=this._dotop.apply(this,dotopArgs);if(typeof value=="undefined"){break}root=result}var assignArgs=ident.slice(ident.length-2,ident.length);assignArgs.unshift(root);assignArgs.push(value);assignArgs.push(set_default);result=this._assign.apply(this,assignArgs)}else{result=this._assign(root,ident,0,value,set_default)}break}return(typeof result!="undefined")?result:""};proto._dotop=function(root,item,args,lvalue){if(root==this.LOCAL_ANCHOR){root=this.data}var atroot=root==this.data;var value,result=undefined;var is_function_call=args instanceof Array;args=args||[];if(typeof root=="undefined"||typeof item=="undefined"||typeof item=="string"&&item.match(/^[\._]/)){return undefined}if(atroot||(root instanceof Object&&!(root instanceof Array))||root==this.data.GLOBAL){if(typeof root[item]!="undefined"&&root[item]!=null&&(!is_function_call||!this.hash_functions[item])){if(typeof root[item]=="function"){result=root[item].apply(root,args)}else{return root[item]}}else{if(lvalue){return root[item]={}}else{if(this.hash_functions[item]&&!atroot||item=="import"){args.unshift(root);result=this.hash_functions[item].apply(this,args)}else{if(item instanceof Array){result={};for(var i=0;i<item.length;i++){result[item[i]]=root[item[i]]}return result}}}}}else{if(root instanceof Array){if(this.list_functions[item]){args.unshift(root);result=this.list_functions[item].apply(this,args)}else{if(typeof item=="string"&&/^-?\d+$/.test(item)||typeof item=="number"){if(typeof root[item]!="function"){return root[item]}result=root[item].apply(this,args)}else{if(item instanceof Array){for(var i=0;i<item.length;i++){result.push(root[item[i]])}return result}}}}else{if(this.string_functions[item]&&!lvalue){args.unshift(root);result=this.string_functions[item].apply(this,args)}else{if(this.list_functions[item]&&!lvalue){args.unshift([root]);result=this.list_functions[item].apply(this,args)}else{result=undefined}}}}if(result instanceof Array){if(typeof result[0]=="undefined"&&typeof result[1]!="undefined"){throw result[1]}}return result};proto._assign=function(root,item,args,value,set_default){var atroot=root==this.data;var result;args=args||[];if(typeof root=="undefined"||typeof item=="undefined"||typeof item=="string"&&item.match(/^[\._]/)){return undefined}if(atroot||root.constructor==Object||root==this.data.GLOBAL){if(root==this.LOCAL_ANCHOR){root=this.data}if(!(set_default&&typeof root[item]!="undefined")){if(atroot&&item=="GLOBAL"){throw"Attempt to modify GLOBAL access modifier"}if(atroot&&item=="LOCAL"){throw"Attempt to modify LOCAL access modifier"}return root[item]=value}}else{if((root instanceof Array)&&(typeof item=="string"&&/^-?\d+$/.test(item)||typeof item=="number")){if(!(set_default&&typeof root[item]!="undefined")){return root[item]=value}}else{if((root.constructor!=Object)&&(root instanceof Object)){try{result=root[item].apply(root,args)}catch(e){}}else{throw"dont know how to assign to ["+root+"."+item+"]"}}}return undefined};proto.string_functions={};proto.string_functions["typeof"]=function(value){return typeof value};proto.string_functions.chunk=function(string,size){var list=new Array();if(!size){size=1}if(size<0){size=0-size;for(var i=string.length-size;i>=0;i=i-size){list.unshift(string.substr(i,size))}if(string.length%size){list.unshift(string.substr(0,string.length%size))}}else{for(i=0;i<string.length;i=i+size){list.push(string.substr(i,size))}}return list};proto.string_functions.defined=function(string){return 1};proto.string_functions.hash=function(string){return{"value":string}};proto.string_functions.length=function(string){return string.length};proto.string_functions.list=function(string){return[string]};proto.string_functions.match=function(string,re,modifiers){var regexp=new RegExp(re,modifiers);var list=string.match(regexp);return list};proto.string_functions.repeat=function(string,args){var n=args||1;var output="";for(var i=0;i<n;i++){output+=string}return output};proto.string_functions.replace=function(string,re,sub,modifiers){var regexp=new RegExp(re,modifiers);if(!sub){sub=""}return string.replace(regexp,sub)};proto.string_functions.search=function(string,re){var regexp=new RegExp(re);return(string.search(regexp)>=0)?1:0};proto.string_functions.size=function(string){return 1};proto.string_functions.split=function(string,re){var regexp=new RegExp(re);var list=string.split(regexp);return list};proto.list_functions={};proto.list_functions["typeof"]=function(list){return"array"};proto.list_functions.list=function(list){return list};proto.list_functions.join=function(list,str){return list.join(str)};proto.list_functions.sort=function(list,key){if(typeof (key)!="undefined"&&key!=""){return list.sort(function(a,b){if(a[key]==b[key]){return 0}else{if(a[key]>b[key]){return 1}else{return -1}}})}return list.sort()};proto.list_functions.nsort=function(list){return list.sort(function(a,b){return(a-b)})};proto.list_functions.grep=function(list,re){var regexp=new RegExp(re);var result=[];for(var i=0;i<list.length;i++){if(list[i].match(regexp)){result.push(list[i])}}return result};proto.list_functions.unique=function(list){var result=[];var seen={};for(var i=0;i<list.length;i++){var elem=list[i];if(!seen[elem]){result.push(elem)}seen[elem]=true}return result};proto.list_functions.reverse=function(list){var result=[];for(var i=list.length-1;i>=0;i--){result.push(list[i])}return result};proto.list_functions.merge=function(list){var result=[];var push_all=function(elem){if(elem instanceof Array){for(var j=0;j<elem.length;j++){result.push(elem[j])}}else{result.push(elem)}};push_all(list);for(var i=1;i<arguments.length;i++){push_all(arguments[i])}return result};proto.list_functions.slice=function(list,start,end){return list.slice(start,end)};proto.list_functions.splice=function(list){var args=Array.prototype.slice.call(arguments);args.shift();return list.splice.apply(list,args)};proto.list_functions.push=function(list,value){list.push(value);return list};proto.list_functions.pop=function(list){return list.pop()};proto.list_functions.unshift=function(list,value){list.unshift(value);return list};proto.list_functions.shift=function(list){return list.shift()};proto.list_functions.first=function(list){return list[0]};proto.list_functions.size=function(list){return list.length};proto.list_functions.max=function(list){return list.length-1};proto.list_functions.last=function(list){return list.slice(-1)};proto.hash_functions={};proto.hash_functions["typeof"]=function(hash){return"object"};proto.hash_functions.each=function(hash){var list=new Array();for(var key in hash){list.push(key,hash[key])}return list};proto.hash_functions.exists=function(hash,key){return(typeof (hash[key])=="undefined")?0:1};proto.hash_functions["import"]=function(hash,hash2){for(var key in hash2){hash[key]=hash2[key]}return""};proto.hash_functions.keys=function(hash){var list=new Array();for(var key in hash){list.push(key)}return list};proto.hash_functions.list=function(hash,what){var list=new Array();var key;if(what=="keys"){for(key in hash){list.push(key)}}else{if(what=="values"){for(key in hash){list.push(hash[key])}}else{if(what=="each"){for(key in hash){list.push(key,hash[key])}}else{for(key in hash){list.push({"key":key,"value":hash[key]})}}}}return list};proto.hash_functions.nsort=function(hash){var list=new Array();for(var key in hash){list.push(key)}return list.sort(function(a,b){return(a-b)})};proto.hash_functions.item=function(hash,key){return hash[key]};proto.hash_functions.size=function(hash){var size=0;for(var key in hash){size++}return size};proto.hash_functions.sort=function(hash){var list=new Array();for(var key in hash){list.push(key)}return list.sort()};proto.hash_functions.values=function(hash){var list=new Array();for(var key in hash){list.push(hash[key])}return list};proto.hash_functions.remove=function(hash,key){return delete hash[key]};proto.hash_functions["delete"]=proto.hash_functions.remove;if(typeof Jemplate.Iterator=="undefined"){Jemplate.Iterator=function(object){if(object instanceof Array){this.object=object;this.size=object.length;this.max=this.size-1}else{if(object instanceof Object){this.object=object;var object_keys=new Array;for(var key in object){object_keys[object_keys.length]=key}this.object_keys=object_keys.sort();this.size=object_keys.length;this.max=this.size-1}else{if(typeof object=="undefined"||object==null||object==""){this.object=null;this.max=-1}}}}}proto=Jemplate.Iterator.prototype;proto.get_first=function(){this.index=0;this.first=1;this.last=0;this.count=1;return this.get_next(1)};proto.get_next=function(should_init){var object=this.object;var index;if(typeof (should_init)!="undefined"&&should_init){index=this.index}else{index=++this.index;this.first=0;this.count=this.index+1;if(this.index==this.size-1){this.last=1}}if(typeof object=="undefined"){throw ("No object to iterate")}if(this.object_keys){if(index<this.object_keys.length){this.prev=index>0?this.object_keys[index-1]:"";this.next=index<this.max?this.object_keys[index+1]:"";return[this.object_keys[index],false]}}else{if(index<=this.max){this.prev=index>0?object[index-1]:"";this.next=index<this.max?object[index+1]:"";return[object[index],false]}}return[null,true]};var stubExplanation="stub that doesn't do anything. Try including the jQuery, YUI, or XHR option when building the runtime";Jemplate.Ajax={get:function(url,callback){throw ("This is a Jemplate.Ajax.get "+stubExplanation)},processGet:function(url,callback){throw ("This is a Jemplate.Ajax.processGet "+stubExplanation)},post:function(url,callback){throw ("This is a Jemplate.Ajax.post "+stubExplanation)}};Jemplate.JSON={parse:function(decodeValue){throw ("This is a Jemplate.JSON.parse "+stubExplanation)},stringify:function(encodeValue){throw ("This is a Jemplate.JSON.stringify "+stubExplanation)}}}())
+if(typeof Jemplate=="undefined"){var Jemplate=function(){this.init.apply(this,arguments)}}Jemplate.VERSION="0.22";Jemplate.process=function(){var A=new Jemplate(Jemplate.prototype.config);return A.process.apply(A,arguments)};(function(){if(!Jemplate.templateMap){Jemplate.templateMap={}}var proto=Jemplate.prototype={};proto.config={AUTO_RESET:true,BLOCKS:{},CONTEXT:null,DEBUG_UNDEF:false,DEFAULT:null,ERROR:null,EVAL_JAVASCRIPT:false,GLOBAL:true,SCOPE:this,FILTERS:{},INCLUDE_PATH:[""],INTERPOLATE:false,OUTPUT:null,PLUGINS:{},POST_PROCESS:[],PRE_PROCESS:[],PROCESS:null,RECURSION:false,STASH:null,TOLERANT:null,VARIABLES:{},WRAPPER:[]};proto.defaults={AUTO_RESET:true,BLOCKS:{},CONTEXT:null,DEBUG_UNDEF:false,DEFAULT:null,ERROR:null,EVAL_JAVASCRIPT:false,GLOBAL:true,SCOPE:this,INCLUDE_PATH:[""],INTERPOLATE:false,OUTPUT:null,PLUGINS:{},POST_PROCESS:[],PRE_PROCESS:[],PROCESS:null,RECURSION:false,STASH:null,TOLERANT:null,VARIABLES:{},WRAPPER:[]};Jemplate.init=function(config){Jemplate.prototype.config=config||{};for(var i in Jemplate.prototype.defaults){if(typeof Jemplate.prototype.config[i]=="undefined"){Jemplate.prototype.config[i]=Jemplate.prototype.defaults[i]}}};proto.init=function(config){this.config=config||{};for(var i in Jemplate.prototype.defaults){if(typeof this.config[i]=="undefined"){this.config[i]=Jemplate.prototype.defaults[i]}}};proto.process=function(template,data,output){var context=this.config.CONTEXT||new Jemplate.Context();context.config=this.config;context.stash=new Jemplate.Stash(this.config.STASH,this.config);context.__filter__=new Jemplate.Filter();context.__filter__.config=this.config;context.__plugin__=new Jemplate.Plugin();context.__plugin__.config=this.config;var result;var proc=function(input){try{if(typeof context.config.PRE_PROCESS=="string"){context.config.PRE_PROCESS=[context.config.PRE_PROCESS]}for(var i=0;i<context.config.PRE_PROCESS.length;i++){context.process(context.config.PRE_PROCESS[i])}result=context.process(template,input);if(typeof context.config.POST_PROCESS=="string"){context.config.PRE_PROCESS=[context.config.POST_PROCESS]}for(i=0;i<context.config.POST_PROCESS.length;i++){context.process(context.config.POST_PROCESS[i])}}catch(e){if(!String(e).match(/Jemplate\.STOP\n/)){throw (e)}result=e.toString().replace(/Jemplate\.STOP\n/,"")}if(typeof output=="undefined"){return result}if(typeof output=="function"){output(result);return null}if(typeof (output)=="string"||output instanceof String){if(output.match(/^#[\w\-]+$/)){var id=output.replace(/^#/,"");var element=document.getElementById(id);if(typeof element=="undefined"){throw ('No element found with id="'+id+'"')}element.innerHTML=result;return null}}else{output.innerHTML=result;return null}throw ("Invalid arguments in call to Jemplate.process");return 1};if(typeof data=="function"){data=data()}else{if(typeof data=="string"){var url=data;Jemplate.Ajax.processGet(url,function(data){proc(data)});return null}}return proc(data)};if(typeof Jemplate.Context=="undefined"){Jemplate.Context=function(){}}proto=Jemplate.Context.prototype;proto.include=function(template,args){return this.process(template,args,true)};proto.process=function(template,args,localise){if(localise){this.stash.clone(args)}else{this.stash.update(args)}var func=Jemplate.templateMap[template];if(typeof func=="undefined"){throw ('No Jemplate template named "'+template+'" available')}var output=func(this);if(localise){this.stash.declone()}return output};proto.set_error=function(error,output){this._error=[error,output];return error};proto.plugin=function(name,args){if(typeof name=="undefined"){throw"Unknown plugin name ':"+name+"'"}var func=eval(name);return new func(this,args)};proto.filter=function(text,name,args){if(name=="null"){name="null_filter"}if(typeof this.__filter__.filters[name]=="function"){return this.__filter__.filters[name](text,args,this)}else{throw"Unknown filter name ':"+name+"'"}};if(typeof Jemplate.Plugin=="undefined"){Jemplate.Plugin=function(){}}proto=Jemplate.Plugin.prototype;proto.plugins={};if(typeof Jemplate.Filter=="undefined"){Jemplate.Filter=function(){}}proto=Jemplate.Filter.prototype;proto.filters={};proto.filters.null_filter=function(text){return""};proto.filters.upper=function(text){return text.toUpperCase()};proto.filters.lower=function(text){return text.toLowerCase()};proto.filters.ucfirst=function(text){var first=text.charAt(0);var rest=text.substr(1);return first.toUpperCase()+rest};proto.filters.lcfirst=function(text){var first=text.charAt(0);var rest=text.substr(1);return first.toLowerCase()+rest};proto.filters.trim=function(text){return text.replace(/^\s+/g,"").replace(/\s+$/g,"")};proto.filters.collapse=function(text){return text.replace(/^\s+/g,"").replace(/\s+$/g,"").replace(/\s+/," ")};proto.filters.html=function(text){text=text.replace(/&/g,"&amp;");text=text.replace(/</g,"&lt;");text=text.replace(/>/g,"&gt;");text=text.replace(/"/g,"&quot;");return text};proto.filters.html_para=function(text){var lines=text.split(/(?:\r?\n){2,}/);return"<p>\n"+lines.join("\n</p>\n\n<p>\n")+"</p>\n"};proto.filters.html_break=function(text){return text.replace(/(\r?\n){2,}/g,"$1<br />$1<br />$1")};proto.filters.html_line_break=function(text){return text.replace(/(\r?\n)/g,"$1<br />$1")};proto.filters.uri=function(text){return encodeURIComponent(text)};proto.filters.url=function(text){return encodeURI(text)};proto.filters.indent=function(text,args){var pad=args[0];if(!text){return null}if(typeof pad=="undefined"){pad=4}var finalpad="";if(typeof pad=="number"||String(pad).match(/^\d$/)){for(var i=0;i<pad;i++){finalpad+=" "}}else{finalpad=pad}var output=text.replace(/^/gm,finalpad);return output};proto.filters.truncate=function(text,args){var len=args[0];if(!text){return null}if(!len){len=32}if(text.length<len){return text}var newlen=len-3;return text.substr(0,newlen)+"..."};proto.filters.repeat=function(text,iter){if(!text){return null}if(!iter||iter==0){iter=1}if(iter==1){return text}var output=text;for(var i=1;i<iter;i++){output+=text}return output};proto.filters.replace=function(text,args){if(!text){return null}var re_search=args[0];var text_replace=args[1];if(!re_search){re_search=""}if(!text_replace){text_replace=""}var re=new RegExp(re_search,"g");return text.replace(re,text_replace)};if(typeof Jemplate.Stash=="undefined"){Jemplate.Stash=function(stash,config){this.__config__=config;this.data={GLOBAL:this.__config__.SCOPE};this.LOCAL_ANCHOR={};this.data.LOCAL=this.LOCAL_ANCHOR;this.update(stash)}}proto=Jemplate.Stash.prototype;proto.clone=function(args){var data=this.data;this.data={GLOBAL:this.__config__.SCOPE};this.data.LOCAL=this.LOCAL_ANCHOR;this.update(data);this.update(args);this.data._PARENT=data};proto.declone=function(args){this.data=this.data._PARENT||this.data};proto.update=function(args){if(typeof args=="undefined"){return }for(var key in args){if(key!="GLOBAL"&&key!="LOCAL"){this.set(key,args[key])}}};proto.get=function(ident,args){var root=this.data;var value;if((ident instanceof Array)||(typeof ident=="string"&&/\./.test(ident))){if(typeof ident=="string"){ident=ident.split(".");var newIdent=[];for(var i=0;i<ident.length;i++){newIdent.push(ident.replace(/\(.*$/,""));newIdent.push(0)}ident=newIdent}for(var i=0;i<ident.length;i+=2){var dotopArgs=ident.slice(i,i+2);dotopArgs.unshift(root);value=this._dotop.apply(this,dotopArgs);if(typeof value=="undefined"){break}root=value}}else{value=this._dotop(root,ident,args)}if(typeof value=="undefined"||value==null){if(this.__config__.DEBUG_UNDEF){throw ("undefined value found while using DEBUG_UNDEF")}value=""}return value};proto.set=function(ident,value,set_default){var root,result,error;root=this.data;while(true){if((ident instanceof Array)||(typeof ident=="string"&&/\./.test(ident))){if(typeof ident=="string"){ident=ident.split(".");var newIdent=[];for(var i=0;i<ident.length;i++){newIdent.push(ident.replace(/\(.*$/,""));newIdent.push(0)}ident=newIdent}for(var i=0;i<ident.length-2;i+=2){var dotopArgs=ident.slice(i,i+2);dotopArgs.unshift(root);dotopArgs.push(1);result=this._dotop.apply(this,dotopArgs);if(typeof value=="undefined"){break}root=result}var assignArgs=ident.slice(ident.length-2,ident.length);assignArgs.unshift(root);assignArgs.push(value);assignArgs.push(set_default);result=this._assign.apply(this,assignArgs)}else{result=this._assign(root,ident,0,value,set_default)}break}return(typeof result!="undefined")?result:""};proto._dotop=function(root,item,args,lvalue){if(root==this.LOCAL_ANCHOR){root=this.data}var atroot=root==this.data;var value,result=undefined;var is_function_call=args instanceof Array;args=args||[];if(typeof root=="undefined"||typeof item=="undefined"||typeof item=="string"&&item.match(/^[\._]/)){return undefined}if(atroot||(root instanceof Object&&!(root instanceof Array))||root==this.data.GLOBAL){if(typeof root[item]!="undefined"&&root[item]!=null&&(!is_function_call||!this.hash_functions[item])){if(typeof root[item]=="function"){result=root[item].apply(root,args)}else{return root[item]}}else{if(lvalue){return root[item]={}}else{if(this.hash_functions[item]&&!atroot||item=="import"){args.unshift(root);result=this.hash_functions[item].apply(this,args)}else{if(item instanceof Array){result={};for(var i=0;i<item.length;i++){result[item[i]]=root[item[i]]}return result}}}}}else{if(root instanceof Array){if(this.list_functions[item]){args.unshift(root);result=this.list_functions[item].apply(this,args)}else{if(typeof item=="string"&&/^-?\d+$/.test(item)||typeof item=="number"){if(typeof root[item]!="function"){return root[item]}result=root[item].apply(this,args)}else{if(item instanceof Array){for(var i=0;i<item.length;i++){result.push(root[item[i]])}return result}}}}else{if(this.string_functions[item]&&!lvalue){args.unshift(root);result=this.string_functions[item].apply(this,args)}else{if(this.list_functions[item]&&!lvalue){args.unshift([root]);result=this.list_functions[item].apply(this,args)}else{result=undefined}}}}if(result instanceof Array){if(typeof result[0]=="undefined"&&typeof result[1]!="undefined"){throw result[1]}}return result};proto._assign=function(root,item,args,value,set_default){var atroot=root==this.data;var result;args=args||[];if(typeof root=="undefined"||typeof item=="undefined"||typeof item=="string"&&item.match(/^[\._]/)){return undefined}if(atroot||root.constructor==Object||root==this.data.GLOBAL){if(root==this.LOCAL_ANCHOR){root=this.data}if(!(set_default&&typeof root[item]!="undefined")){if(atroot&&item=="GLOBAL"){throw"Attempt to modify GLOBAL access modifier"}if(atroot&&item=="LOCAL"){throw"Attempt to modify LOCAL access modifier"}return root[item]=value}}else{if((root instanceof Array)&&(typeof item=="string"&&/^-?\d+$/.test(item)||typeof item=="number")){if(!(set_default&&typeof root[item]!="undefined")){return root[item]=value}}else{if((root.constructor!=Object)&&(root instanceof Object)){try{result=root[item].apply(root,args)}catch(e){}}else{throw"dont know how to assign to ["+root+"."+item+"]"}}}return undefined};proto.string_functions={};proto.string_functions["typeof"]=function(value){return typeof value};proto.string_functions.chunk=function(string,size){var list=new Array();if(!size){size=1}if(size<0){size=0-size;for(var i=string.length-size;i>=0;i=i-size){list.unshift(string.substr(i,size))}if(string.length%size){list.unshift(string.substr(0,string.length%size))}}else{for(i=0;i<string.length;i=i+size){list.push(string.substr(i,size))}}return list};proto.string_functions.defined=function(string){return 1};proto.string_functions.hash=function(string){return{"value":string}};proto.string_functions.length=function(string){return string.length};proto.string_functions.list=function(string){return[string]};proto.string_functions.match=function(string,re,modifiers){var regexp=new RegExp(re,modifiers==undefined?"g":modifiers);var list=string.match(regexp);return list};proto.string_functions.repeat=function(string,args){var n=args||1;var output="";for(var i=0;i<n;i++){output+=string}return output};proto.string_functions.replace=function(string,re,sub,modifiers){var regexp=new RegExp(re,modifiers==undefined?"g":modifiers);if(!sub){sub=""}return string.replace(regexp,sub)};proto.string_functions.search=function(string,re){var regexp=new RegExp(re);return(string.search(regexp)>=0)?1:0};proto.string_functions.size=function(string){return 1};proto.string_functions.split=function(string,re){var regexp=new RegExp(re);var list=string.split(regexp);return list};proto.list_functions={};proto.list_functions["typeof"]=function(list){return"array"};proto.list_functions.list=function(list){return list};proto.list_functions.join=function(list,str){return list.join(str)};proto.list_functions.sort=function(list,key){if(typeof (key)!="undefined"&&key!=""){return list.sort(function(a,b){if(a[key]==b[key]){return 0}else{if(a[key]>b[key]){return 1}else{return -1}}})}return list.sort()};proto.list_functions.nsort=function(list){return list.sort(function(a,b){return(a-b)})};proto.list_functions.grep=function(list,re){var regexp=new RegExp(re);var result=[];for(var i=0;i<list.length;i++){if(list[i].match(regexp)){result.push(list[i])}}return result};proto.list_functions.unique=function(list){var result=[];var seen={};for(var i=0;i<list.length;i++){var elem=list[i];if(!seen[elem]){result.push(elem)}seen[elem]=true}return result};proto.list_functions.reverse=function(list){var result=[];for(var i=list.length-1;i>=0;i--){result.push(list[i])}return result};proto.list_functions.merge=function(list){var result=[];var push_all=function(elem){if(elem instanceof Array){for(var j=0;j<elem.length;j++){result.push(elem[j])}}else{result.push(elem)}};push_all(list);for(var i=1;i<arguments.length;i++){push_all(arguments[i])}return result};proto.list_functions.slice=function(list,start,end){return list.slice(start,end)};proto.list_functions.splice=function(list){var args=Array.prototype.slice.call(arguments);args.shift();return list.splice.apply(list,args)};proto.list_functions.push=function(list,value){list.push(value);return list};proto.list_functions.pop=function(list){return list.pop()};proto.list_functions.unshift=function(list,value){list.unshift(value);return list};proto.list_functions.shift=function(list){return list.shift()};proto.list_functions.first=function(list){return list[0]};proto.list_functions.size=function(list){return list.length};proto.list_functions.max=function(list){return list.length-1};proto.list_functions.last=function(list){return list.slice(-1)};proto.hash_functions={};proto.hash_functions["typeof"]=function(hash){return"object"};proto.hash_functions.each=function(hash){var list=new Array();for(var key in hash){list.push(key,hash[key])}return list};proto.hash_functions.exists=function(hash,key){return(typeof (hash[key])=="undefined")?0:1};proto.hash_functions["import"]=function(hash,hash2){for(var key in hash2){hash[key]=hash2[key]}return""};proto.hash_functions.keys=function(hash){var list=new Array();for(var key in hash){list.push(key)}return list};proto.hash_functions.list=function(hash,what){var list=new Array();var key;if(what=="keys"){for(key in hash){list.push(key)}}else{if(what=="values"){for(key in hash){list.push(hash[key])}}else{if(what=="each"){for(key in hash){list.push(key,hash[key])}}else{for(key in hash){list.push({"key":key,"value":hash[key]})}}}}return list};proto.hash_functions.nsort=function(hash){var list=new Array();for(var key in hash){list.push(key)}return list.sort(function(a,b){return(a-b)})};proto.hash_functions.item=function(hash,key){return hash[key]};proto.hash_functions.size=function(hash){var size=0;for(var key in hash){size++}return size};proto.hash_functions.sort=function(hash){var list=new Array();for(var key in hash){list.push(key)}return list.sort()};proto.hash_functions.values=function(hash){var list=new Array();for(var key in hash){list.push(hash[key])}return list};proto.hash_functions.pairs=function(hash){var list=new Array();var keys=new Array();for(var key in hash){keys.push(key)}keys.sort();for(var key in keys){key=keys[key];list.push({"key":key,"value":hash[key]})}return list};proto.hash_functions.remove=function(hash,key){return delete hash[key]};proto.hash_functions["delete"]=proto.hash_functions.remove;if(typeof Jemplate.Iterator=="undefined"){Jemplate.Iterator=function(object){if(object instanceof Array){this.object=object;this.size=object.length;this.max=this.size-1}else{if(object instanceof Object){this.object=object;var object_keys=new Array;for(var key in object){object_keys[object_keys.length]=key}this.object_keys=object_keys.sort();this.size=object_keys.length;this.max=this.size-1}else{if(typeof object=="undefined"||object==null||object==""){this.object=null;this.max=-1}}}}}proto=Jemplate.Iterator.prototype;proto.get_first=function(){this.index=0;this.first=1;this.last=0;this.count=1;return this.get_next(1)};proto.get_next=function(should_init){var object=this.object;var index;if(typeof (should_init)!="undefined"&&should_init){index=this.index}else{index=++this.index;this.first=0;this.count=this.index+1;if(this.index==this.size-1){this.last=1}}if(typeof object=="undefined"){throw ("No object to iterate")}if(this.object_keys){if(index<this.object_keys.length){this.prev=index>0?this.object_keys[index-1]:"";this.next=index<this.max?this.object_keys[index+1]:"";return[this.object_keys[index],false]}}else{if(index<=this.max){this.prev=index>0?object[index-1]:"";this.next=index<this.max?object[index+1]:"";return[object[index],false]}}return[null,true]};var stubExplanation="stub that doesn't do anything. Try including the jQuery, YUI, or XHR option when building the runtime";Jemplate.Ajax={get:function(url,callback){throw ("This is a Jemplate.Ajax.get "+stubExplanation)},processGet:function(url,callback){throw ("This is a Jemplate.Ajax.processGet "+stubExplanation)},post:function(url,callback){throw ("This is a Jemplate.Ajax.post "+stubExplanation)}};Jemplate.JSON={parse:function(decodeValue){throw ("This is a Jemplate.JSON.parse "+stubExplanation)},stringify:function(encodeValue){throw ("This is a Jemplate.JSON.stringify "+stubExplanation)}}}())
 ...
 }
 
@@ -19759,7 +19782,7 @@ sub json_json2_internal {
 
 var JSON;
 
-if(!JSON){var JSON}if(!JSON){JSON=function(){function f(n){return n<10?"0"+n:n}Date.prototype.toJSON=function(){return this.getUTCFullYear()+"-"+f(this.getUTCMonth()+1)+"-"+f(this.getUTCDate())+"T"+f(this.getUTCHours())+":"+f(this.getUTCMinutes())+":"+f(this.getUTCSeconds())+"Z"};var escapeable=/["\\\x00-\x1f\x7f-\x9f]/g,gap,indent,meta={"\b":"\\b","\t":"\\t","\n":"\\n","\f":"\\f","\r":"\\r",'"':'\\"',"\\":"\\\\"},rep;function quote(string){return escapeable.test(string)?'"'+string.replace(escapeable,function(a){var c=meta[a];if(typeof c==="string"){return c}c=a.charCodeAt();return"\\u00"+Math.floor(c/16).toString(16)+(c%16).toString(16)})+'"':'"'+string+'"'}function str(key,holder){var i,k,v,length,mind=gap,partial,value=holder[key];if(value&&typeof value==="object"&&typeof value.toJSON==="function"){value=value.toJSON(key)}if(typeof rep==="function"){value=rep.call(holder,key,value)}switch(typeof value){case"string":return quote(value);case"number":return isFinite(value)?String(value):"null";case"boolean":case"null":return String(value);case"object":if(!value){return"null"}gap+=indent;partial=[];if(typeof value.length==="number"&&!(value.propertyIsEnumerable("length"))){length=value.length;for(i=0;i<length;i+=1){partial[i]=str(i,value)||"null"}v=partial.length===0?"[]":gap?"[\n"+gap+partial.join(",\n"+gap)+"\n"+mind+"]":"["+partial.join(",")+"]";gap=mind;return v}if(typeof rep==="object"){length=rep.length;for(i=0;i<length;i+=1){k=rep[i];if(typeof k==="string"){v=str(k,value,rep);if(v){partial.push(quote(k)+(gap?": ":":")+v)}}}}else{for(k in value){v=str(k,value,rep);if(v){partial.push(quote(k)+(gap?": ":":")+v)}}}v=partial.length===0?"{}":gap?"{\n"+gap+partial.join(",\n"+gap)+"\n"+mind+"}":"{"+partial.join(",")+"}";gap=mind;return v}return null}return{stringify:function(value,replacer,space){var i;gap="";indent="";if(space){if(typeof space==="number"){for(i=0;i<space;i+=1){indent+=" "}}else{if(typeof space==="string"){indent=space}}}if(!replacer){rep=function(key,value){if(!Object.hasOwnProperty.call(this,key)){return undefined}return value}}else{if(typeof replacer==="function"||(typeof replacer==="object"&&typeof replacer.length==="number")){rep=replacer}else{throw new Error("JSON.stringify")}}return str("",{"":value})},parse:function(text,reviver){var j;function walk(holder,key){var k,v,value=holder[key];if(value&&typeof value==="object"){for(k in value){if(Object.hasOwnProperty.call(value,k)){v=walk(value,k);if(v!==undefined){value[k]=v}else{delete value[k]}}}}return reviver.call(holder,key,value)}if(/^[\],:{}\s]*$/.test(text.replace(/\\["\\\/bfnrtu]/g,"@").replace(/"[^"\\\n\r]*"|true|false|null|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g,"]").replace(/(?:^|:|,)(?:\s*\[)+/g,""))){j=eval("("+text+")");return typeof reviver==="function"?walk({"":j},""):j}throw new SyntaxError("JSON.parse")},quote:quote}}()}
+if(!this.JSON){this.JSON={}}(function(){function f(n){return n<10?"0"+n:n}if(typeof Date.prototype.toJSON!=="function"){Date.prototype.toJSON=function(key){return this.getUTCFullYear()+"-"+f(this.getUTCMonth()+1)+"-"+f(this.getUTCDate())+"T"+f(this.getUTCHours())+":"+f(this.getUTCMinutes())+":"+f(this.getUTCSeconds())+"Z"};String.prototype.toJSON=Number.prototype.toJSON=Boolean.prototype.toJSON=function(key){return this.valueOf()}}var cx=/[\u0000\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,escapable=/[\\\"\x00-\x1f\x7f-\x9f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,gap,indent,meta={"\b":"\\b","\t":"\\t","\n":"\\n","\f":"\\f","\r":"\\r",'"':'\\"',"\\":"\\\\"},rep;function quote(string){escapable.lastIndex=0;return escapable.test(string)?'"'+string.replace(escapable,function(a){var c=meta[a];return typeof c==="string"?c:"\\u"+("0000"+a.charCodeAt(0).toString(16)).slice(-4)})+'"':'"'+string+'"'}function str(key,holder){var i,k,v,length,mind=gap,partial,value=holder[key];if(value&&typeof value==="object"&&typeof value.toJSON==="function"){value=value.toJSON(key)}if(typeof rep==="function"){value=rep.call(holder,key,value)}switch(typeof value){case"string":return quote(value);case"number":return isFinite(value)?String(value):"null";case"boolean":case"null":return String(value);case"object":if(!value){return"null"}gap+=indent;partial=[];if(Object.prototype.toString.apply(value)==="[object Array]"){length=value.length;for(i=0;i<length;i+=1){partial[i]=str(i,value)||"null"}v=partial.length===0?"[]":gap?"[\n"+gap+partial.join(",\n"+gap)+"\n"+mind+"]":"["+partial.join(",")+"]";gap=mind;return v}if(rep&&typeof rep==="object"){length=rep.length;for(i=0;i<length;i+=1){k=rep[i];if(typeof k==="string"){v=str(k,value);if(v){partial.push(quote(k)+(gap?": ":":")+v)}}}}else{for(k in value){if(Object.hasOwnProperty.call(value,k)){v=str(k,value);if(v){partial.push(quote(k)+(gap?": ":":")+v)}}}}v=partial.length===0?"{}":gap?"{\n"+gap+partial.join(",\n"+gap)+"\n"+mind+"}":"{"+partial.join(",")+"}";gap=mind;return v}return""}if(typeof JSON.stringify!=="function"){JSON.stringify=function(value,replacer,space){var i;gap="";indent="";if(typeof space==="number"){for(i=0;i<space;i+=1){indent+=" "}}else{if(typeof space==="string"){indent=space}}rep=replacer;if(replacer&&typeof replacer!=="function"&&(typeof replacer!=="object"||typeof replacer.length!=="number")){throw new Error("JSON.stringify")}return str("",{"":value})}}if(typeof JSON.parse!=="function"){JSON.parse=function(text,reviver){var j;function walk(holder,key){var k,v,value=holder[key];if(value&&typeof value==="object"){for(k in value){if(Object.hasOwnProperty.call(value,k)){v=walk(value,k);if(v!==undefined){value[k]=v}else{delete value[k]}}}}return reviver.call(holder,key,value)}cx.lastIndex=0;if(cx.test(text)){text=text.replace(cx,function(a){return"\\u"+("0000"+a.charCodeAt(0).toString(16)).slice(-4)})}if(/^[\],:{}\s]*$/.test(text.replace(/\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4})/g,"@").replace(/"[^"\\\n\r]*"|true|false|null|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g,"]").replace(/(?:^|:|,)(?:\s*\[)+/g,""))){j=eval("("+text+")");return typeof reviver==="function"?walk({"":j},""):j}throw new SyntaxError("JSON.parse")}}}())
 
 Jemplate.JSON={parse:function(A){return JSON.parse(A)},stringify:function(A){return JSON.stringify(A)}}
 
@@ -19775,7 +19798,7 @@ sub json_yui {
 
 sub json2 {
     <<'...';
-if(!JSON){var JSON}if(!JSON){JSON=function(){function f(n){return n<10?"0"+n:n}Date.prototype.toJSON=function(){return this.getUTCFullYear()+"-"+f(this.getUTCMonth()+1)+"-"+f(this.getUTCDate())+"T"+f(this.getUTCHours())+":"+f(this.getUTCMinutes())+":"+f(this.getUTCSeconds())+"Z"};var escapeable=/["\\\x00-\x1f\x7f-\x9f]/g,gap,indent,meta={"\b":"\\b","\t":"\\t","\n":"\\n","\f":"\\f","\r":"\\r",'"':'\\"',"\\":"\\\\"},rep;function quote(string){return escapeable.test(string)?'"'+string.replace(escapeable,function(a){var c=meta[a];if(typeof c==="string"){return c}c=a.charCodeAt();return"\\u00"+Math.floor(c/16).toString(16)+(c%16).toString(16)})+'"':'"'+string+'"'}function str(key,holder){var i,k,v,length,mind=gap,partial,value=holder[key];if(value&&typeof value==="object"&&typeof value.toJSON==="function"){value=value.toJSON(key)}if(typeof rep==="function"){value=rep.call(holder,key,value)}switch(typeof value){case"string":return quote(value);case"number":return isFinite(value)?String(value):"null";case"boolean":case"null":return String(value);case"object":if(!value){return"null"}gap+=indent;partial=[];if(typeof value.length==="number"&&!(value.propertyIsEnumerable("length"))){length=value.length;for(i=0;i<length;i+=1){partial[i]=str(i,value)||"null"}v=partial.length===0?"[]":gap?"[\n"+gap+partial.join(",\n"+gap)+"\n"+mind+"]":"["+partial.join(",")+"]";gap=mind;return v}if(typeof rep==="object"){length=rep.length;for(i=0;i<length;i+=1){k=rep[i];if(typeof k==="string"){v=str(k,value,rep);if(v){partial.push(quote(k)+(gap?": ":":")+v)}}}}else{for(k in value){v=str(k,value,rep);if(v){partial.push(quote(k)+(gap?": ":":")+v)}}}v=partial.length===0?"{}":gap?"{\n"+gap+partial.join(",\n"+gap)+"\n"+mind+"}":"{"+partial.join(",")+"}";gap=mind;return v}return null}return{stringify:function(value,replacer,space){var i;gap="";indent="";if(space){if(typeof space==="number"){for(i=0;i<space;i+=1){indent+=" "}}else{if(typeof space==="string"){indent=space}}}if(!replacer){rep=function(key,value){if(!Object.hasOwnProperty.call(this,key)){return undefined}return value}}else{if(typeof replacer==="function"||(typeof replacer==="object"&&typeof replacer.length==="number")){rep=replacer}else{throw new Error("JSON.stringify")}}return str("",{"":value})},parse:function(text,reviver){var j;function walk(holder,key){var k,v,value=holder[key];if(value&&typeof value==="object"){for(k in value){if(Object.hasOwnProperty.call(value,k)){v=walk(value,k);if(v!==undefined){value[k]=v}else{delete value[k]}}}}return reviver.call(holder,key,value)}if(/^[\],:{}\s]*$/.test(text.replace(/\\["\\\/bfnrtu]/g,"@").replace(/"[^"\\\n\r]*"|true|false|null|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g,"]").replace(/(?:^|:|,)(?:\s*\[)+/g,""))){j=eval("("+text+")");return typeof reviver==="function"?walk({"":j},""):j}throw new SyntaxError("JSON.parse")},quote:quote}}()}
+if(!this.JSON){this.JSON={}}(function(){function f(n){return n<10?"0"+n:n}if(typeof Date.prototype.toJSON!=="function"){Date.prototype.toJSON=function(key){return this.getUTCFullYear()+"-"+f(this.getUTCMonth()+1)+"-"+f(this.getUTCDate())+"T"+f(this.getUTCHours())+":"+f(this.getUTCMinutes())+":"+f(this.getUTCSeconds())+"Z"};String.prototype.toJSON=Number.prototype.toJSON=Boolean.prototype.toJSON=function(key){return this.valueOf()}}var cx=/[\u0000\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,escapable=/[\\\"\x00-\x1f\x7f-\x9f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,gap,indent,meta={"\b":"\\b","\t":"\\t","\n":"\\n","\f":"\\f","\r":"\\r",'"':'\\"',"\\":"\\\\"},rep;function quote(string){escapable.lastIndex=0;return escapable.test(string)?'"'+string.replace(escapable,function(a){var c=meta[a];return typeof c==="string"?c:"\\u"+("0000"+a.charCodeAt(0).toString(16)).slice(-4)})+'"':'"'+string+'"'}function str(key,holder){var i,k,v,length,mind=gap,partial,value=holder[key];if(value&&typeof value==="object"&&typeof value.toJSON==="function"){value=value.toJSON(key)}if(typeof rep==="function"){value=rep.call(holder,key,value)}switch(typeof value){case"string":return quote(value);case"number":return isFinite(value)?String(value):"null";case"boolean":case"null":return String(value);case"object":if(!value){return"null"}gap+=indent;partial=[];if(Object.prototype.toString.apply(value)==="[object Array]"){length=value.length;for(i=0;i<length;i+=1){partial[i]=str(i,value)||"null"}v=partial.length===0?"[]":gap?"[\n"+gap+partial.join(",\n"+gap)+"\n"+mind+"]":"["+partial.join(",")+"]";gap=mind;return v}if(rep&&typeof rep==="object"){length=rep.length;for(i=0;i<length;i+=1){k=rep[i];if(typeof k==="string"){v=str(k,value);if(v){partial.push(quote(k)+(gap?": ":":")+v)}}}}else{for(k in value){if(Object.hasOwnProperty.call(value,k)){v=str(k,value);if(v){partial.push(quote(k)+(gap?": ":":")+v)}}}}v=partial.length===0?"{}":gap?"{\n"+gap+partial.join(",\n"+gap)+"\n"+mind+"}":"{"+partial.join(",")+"}";gap=mind;return v}return""}if(typeof JSON.stringify!=="function"){JSON.stringify=function(value,replacer,space){var i;gap="";indent="";if(typeof space==="number"){for(i=0;i<space;i+=1){indent+=" "}}else{if(typeof space==="string"){indent=space}}rep=replacer;if(replacer&&typeof replacer!=="function"&&(typeof replacer!=="object"||typeof replacer.length!=="number")){throw new Error("JSON.stringify")}return str("",{"":value})}}if(typeof JSON.parse!=="function"){JSON.parse=function(text,reviver){var j;function walk(holder,key){var k,v,value=holder[key];if(value&&typeof value==="object"){for(k in value){if(Object.hasOwnProperty.call(value,k)){v=walk(value,k);if(v!==undefined){value[k]=v}else{delete value[k]}}}}return reviver.call(holder,key,value)}cx.lastIndex=0;if(cx.test(text)){text=text.replace(cx,function(a){return"\\u"+("0000"+a.charCodeAt(0).toString(16)).slice(-4)})}if(/^[\],:{}\s]*$/.test(text.replace(/\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4})/g,"@").replace(/"[^"\\\n\r]*"|true|false|null|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g,"]").replace(/(?:^|:|,)(?:\s*\[)+/g,""))){j=eval("("+text+")");return typeof reviver==="function"?walk({"":j},""):j}throw new SyntaxError("JSON.parse")}}}())
 ...
 }
 
@@ -19814,7 +19837,7 @@ use warnings;
 use Template 2.14;
 use Getopt::Long;
 
-our $VERSION = '0.23_1';
+our $VERSION = '0.24_2';
 
 use Jemplate::Parser;
 
@@ -20040,7 +20063,7 @@ sub make_file_list {
 
     foreach my $arg (@args) {
         unless (-e $arg) { next; } # file exists
-        unless (-s $arg) { next; } # file size > 0
+        unless (-s $arg or -d $arg) { next; } # file size > 0 or directory (for Win platform)
 
         if (-d $arg) {
             foreach my $full ( recurse_dir($arg) ) {

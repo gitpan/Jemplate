@@ -5,7 +5,13 @@ use warnings;
 use Template 2.14;
 use Getopt::Long;
 
-our $VERSION = '0.24_2';
+=head1 VERSION
+
+Version 0.24_4
+
+=cut
+ 
+our $VERSION = '0.24_4';
 
 use Jemplate::Parser;
 
@@ -587,12 +593,13 @@ Jemplate now supports almost all the TT directives, including:
   * [% LAST %]
   * [% CLEAR %]
   * [%# this is a comment %]
+  * [% MACRO name(param1, param2) BLOCK %] ... [% END %]  
 
 ALL of the string virtual functions are supported.
 
 ALL of the array virtual functions are supported:
 
-ALL of the hash virtual functions are supported (except for import):
+ALL of the hash virtual functions are supported:
 
 MANY of the standard filters are implemented.
 
@@ -613,8 +620,8 @@ All tests run 100% successful in the above browsers.
 
 =head1 DEVELOPMENT
 
-The bleeding edge code is available via Subversion at
-http://svn.jemplate.net/repo/trunk/
+The bleeding edge code is available via Git at
+git://github.com/ingydotnet/jemplate.git
 
 You can run the runtime tests directly from
 http://svn.jemplate.net/repo/trunk/tests/run/index.html or from the
@@ -656,6 +663,8 @@ Christian Hansen
 David A. Coffey <dacoffey@cogsmith.com>
 
 Robert Krimen <robertkrimen@gmail.com>
+
+Nickolay Platonov <nickolay8@gmail.com>
 
 =head1 COPYRIGHT
 
