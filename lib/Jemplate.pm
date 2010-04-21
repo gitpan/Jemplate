@@ -7,11 +7,11 @@ use Getopt::Long;
 
 =head1 VERSION
 
-Version 0.24_4
+Version 0.25
 
 =cut
  
-our $VERSION = '0.24_4';
+our $VERSION = '0.25';
 
 use Jemplate::Parser;
 
@@ -427,6 +427,10 @@ or, with jQuery.js:
     jQuery.getJSON("url/data.json", function(data) {
         Jemplate.process('my-template.html', data, '#some-div');
     });
+
+From the commandline:
+
+    jemplate --runtime --compile path/to/jemplate/directory/ > jemplate.js
 
 =head1 DESCRIPTION
 
