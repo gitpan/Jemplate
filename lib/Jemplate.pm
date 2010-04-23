@@ -7,11 +7,11 @@ use Getopt::Long;
 
 =head1 VERSION
 
-Version 0.25
+Version 0.25_1
 
 =cut
  
-our $VERSION = '0.25';
+our $VERSION = '0.25_1';
 
 use Jemplate::Parser;
 
@@ -225,8 +225,10 @@ sub recurse_dir {
     my $dir = shift;
     my @files;
     foreach ( File::Find::Rule->file->in( $dir ) ) {
-        # don't include .hidden files
-        unless ($_ =~ '\/\.') { push(@files, $_); }
+        if ( m{/\.[^\.]+} ) {} # Skip ".hidden" files or directories
+        else {
+            push @files, $_;
+        }
     }
     return @files;
 }

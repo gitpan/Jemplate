@@ -54,6 +54,9 @@ META.yml
 README
 t/a.js
 t/assets/jt/hello
+t/assets/jt/a/.hidden/apple
+t/assets/jt/a/b/c/.hidden
+t/assets/jt/a/b/cherry
 t/b.js
 t/block.t
 t/call.t
@@ -85,6 +88,13 @@ t/TestJemplate.pm
 t/throw.t
 t/while.t
 t/wrapper.t
+t/pairs.t
+t/9bug/37539-intermediate-instantiation.t
+t/9bug/37540-iterate-over-empty-object.t
+t/9bug/37895-inconsistent-jemplate-version.t
+t/9bug/53967-compiler-double-dot-path-fail.t
+t/9bug/53453-make-Jemplate-slice-like-TT-slice.t
+t/9bug/53454-array-range-operator.t
 tests/Makefile
 tests/README
 tests/bin/daemon

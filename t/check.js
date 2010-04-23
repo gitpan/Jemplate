@@ -785,7 +785,12 @@ proto.list_functions.merge = function(list /*, ... args */) {
 }
 
 proto.list_functions.slice = function(list, start, end) {
-    return list.slice(start, end);
+    // To make it like slice in TT
+    // See rt53453
+    if ( end == -1 ) {
+        return list.slice( start );
+    }
+    return list.slice( start, end + 1 );
 }
 
 proto.list_functions.splice = function(list /*, ... args */ ) {
@@ -1907,6 +1912,39 @@ Jemplate.JSON = {
 
 if (typeof(Jemplate) == 'undefined')
     throw('Jemplate.js must be loaded before any Jemplate template files');
+
+Jemplate.templateMap['a/b/cherry'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+
+output += '\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
+
+Jemplate.templateMap['cherry'] = function(context) {
+    if (! context) throw('Jemplate function called without context\n');
+    var stash = context.stash;
+    var output = '';
+
+    try {
+output += '\napple\n';
+    }
+    catch(e) {
+        var error = context.set_error(e, output);
+        throw(error);
+    }
+
+    return output;
+}
 
 Jemplate.templateMap['hello'] = function(context) {
     if (! context) throw('Jemplate function called without context\n');
