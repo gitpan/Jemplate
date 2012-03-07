@@ -1,7 +1,4 @@
-use inc::Module::Install;
-
-name            'Jemplate';
-all_from        'lib/Jemplate.pm';
+use inc::Module::Package 'Ingy:modern 0.13';
 
 {
     require ExtUtils::MakeMaker;
@@ -26,14 +23,12 @@ if (-e 'inc/.author') {
 requires        'Template' => '2.19';
 requires        'File::Find::Rule' => '0.30';
 
-use_test_base;
-
 tests_recursive;
 
 no_index        directory => 'examples';
 
-clean_files     't/Jemplate.js';
+clean_files     't/Jemplate.js t/a.js t/b.js t/check.js';
 
 install_script  'jemplate';
 
-WriteAll;
+__END__

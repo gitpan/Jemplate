@@ -1,4 +1,10 @@
 ---
+version: 0.262
+date: Tuesday March 06 18:13:00 CST 2012
+changes:
+- Fixed Jemplate when using Template::Toolkit 2.23 and newer (fREW Schmidt)
+
+---
 version: 0.261
 date: Tuesday April 27 09:35:06 PDT 2010
 changes:

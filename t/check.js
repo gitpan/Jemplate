@@ -29,6 +29,11 @@ Jemplate.process = function() {
     return jemplate.process.apply(jemplate, arguments);
 }
 
+// commonjs export style
+if (typeof(exports) == "object") {
+    exports.Jemplate = Jemplate;
+}
+
 ;(function(){
 
 if (! Jemplate.templateMap)
@@ -1909,6 +1914,11 @@ Jemplate.JSON = {
 
    Copyright 2006-2008 - Ingy döt Net - All rights reserved.
 */
+
+var Jemplate;
+if (typeof(exports) == 'object') {
+    Jemplate = require("jemplate").Jemplate;
+}
 
 if (typeof(Jemplate) == 'undefined')
     throw('Jemplate.js must be loaded before any Jemplate template files');

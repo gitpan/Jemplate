@@ -87,7 +87,7 @@ use strict;
 use Exporter;
 use vars qw/$VERSION @ISA @EXPORT_OK
             $strict_leading_dot $strict_wildcard_slash/;
-$VERSION = '0.08';
+$VERSION = '0.09';
 @ISA = 'Exporter';
 @EXPORT_OK = qw( glob_to_regex glob_to_regex_string match_glob );
 
@@ -16286,12 +16286,12 @@ sub
 	[#Rule 48
 		 'condition', 6,
 sub
-{ $factory->if("!($_[2])", @_[4, 5])  }
+{ $factory->if("($_[2]) == false", @_[4, 5])  }
 	],
 	[#Rule 49
 		 'condition', 3,
 sub
-{ $factory->if("!($_[3])", $_[1])     }
+{ $factory->if("($_[3]) == false", $_[1])     }
 	],
 	[#Rule 50
 		 'else', 5,
