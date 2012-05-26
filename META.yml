@@ -26,5 +26,10 @@ requires:
   Template: 2.14
   perl: 5.6.1
 resources:
+  homepage: https://github.com/ingydotnet/jemplate/tree
   license: http://dev.perl.org/licenses/
-version: 0.262
+  repository:
+    type: git
+    url: git://github.com/ingydotnet/jemplate.git
+    web: https://github.com/ingydotnet/jemplate/tree
+version: 0.27

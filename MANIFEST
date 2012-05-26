@@ -1,5 +1,4 @@
 bin/jemplate
-bin/README
 Changes
 DESIGN
 doc/html/Jemplate.html
@@ -47,6 +46,7 @@ inc/Test/Base/Filter.pm
 inc/Test/Builder.pm
 inc/Test/Builder/Module.pm
 inc/Test/More.pm
+INSTALL
 jemplate
 lib/Jemplate.pm
 lib/Jemplate.pod
@@ -105,15 +105,12 @@ t/9bug/53453-make-Jemplate-slice-like-TT-slice.t
 t/9bug/53454-array-range-operator.t
 t/9bug/53967-compiler-double-dot-path-fail.t
 t/9bug/56965-DIV-operator-broken.t
-t/a.js
 t/assets/jt/a/.hidden/apple
 t/assets/jt/a/b/c/.hidden
 t/assets/jt/a/b/cherry
 t/assets/jt/hello
-t/b.js
 t/block.t
 t/call.t
-t/check.js
 t/clear.t
 t/for.t
 t/get-set.t

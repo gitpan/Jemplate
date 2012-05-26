@@ -1,8 +1,8 @@
 ---
-version: 0.262
-date: Tuesday March 06 18:13:00 CST 2012
+version: 0.27
+date:    Sat May 26 02:53:31 UTC 2012
 changes:
-- Fixed Jemplate when using Template::Toolkit 2.23 and newer (fREW Schmidt)
+- Fixed collision of bin/jemplate and ./jemplate in Makefile
 
 ---
 version: 0.261
@@ -194,8 +194,8 @@ changes:
 - Cory fixed concatenation
 - Yann Kerhervé added filtering support
 - Yann added these filters: collapse, html, html_break, html_entity,
-  html_line_break, html_para, indent, lcfirst, lower, null, trim, ucfirst,
-  upper, uri
+   html_line_break, html_para, indent, lcfirst, lower, null, trim, ucfirst,
+   upper, uri
 - Ingy removed PERL and RAWPERL support
 - Cory made test output display nicely
 - Ingy made test index link to subtests
