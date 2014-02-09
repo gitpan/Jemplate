@@ -1,23 +1,13 @@
-##
-# name:      Jemplate
-# abstract:  JavaScript Templating with Template Toolkit
-# author:    Ingy döt Net <ingy@cpan.org>
-# license:   perl
-# copyright: 2006-2008, 2011
-
 # ToDo:
-# - Module::Package
-# - Stardoc
 # - Use TT:Simple in Makefiles
 
 package Jemplate;
-use 5.006001;
 use strict;
 use warnings;
 use Template 2.14;
 use Getopt::Long;
 
-our $VERSION = '0.27';
+our $VERSION = '0.28'; # VERSION
 
 use Jemplate::Parser;
 
@@ -48,7 +38,7 @@ Where "--runtime" and "runtime-opt" can include:
     --json=json2        Include http://www.json.org/json2.js for parsing/stringifying
     --json=yui          Use YUI: YAHOO.lang.JSON (requires external YUI)
     --json=none         Doesn't provide any JSON functionality except a warning
-    
+
     --ajax              By itself, equivalent to --ajax=xhr
     --ajax=jquery       Use jQuery for Ajax get and post (requires external jQuery)
     --ajax=yui          Use YUI: yui/connection/connection.js (requires external YUI)
@@ -74,6 +64,7 @@ Where "compile-opt" can include:
     --eval
     --noeval
     -s, --source
+    --exclude
 
 For more information use:
     perldoc jemplate
@@ -93,7 +84,7 @@ sub main {
         return unless $compile;
     }
 
-    my $templates = make_file_list(@argv);
+    my $templates = make_file_list($jemplate_options->{exclude}, @argv);
     print_usage_and_exit() unless @$templates;
 
     if ($list) {
@@ -150,7 +141,8 @@ sub get_options {
         ? $ENV{JEMPLATE_EVAL_JAVASCRIPT}
         : 1;
 
-    my $source = 0;
+    my $source  = 0;
+    my $exclude = 0;
     my ($ajax, $json, $xxx, $xhr, $compact, $minify);
 
     my $help = 0;
@@ -169,6 +161,7 @@ sub get_options {
         "eval!"         => \$eval_javascript,
 
         "source|s"      => \$source,
+        "exclude=s"     => \$exclude,
 
         "ajax:s"        => \$ajax,
         "json:s"        => \$json,
@@ -211,6 +204,7 @@ sub get_options {
         $options,
         { compile => $compile, runtime => $runtime, list => $list,
             source => $source,
+            exclude => $exclude,
             ajax => $ajax, json => $json, xxx => $xxx, xhr => $xhr,
             compact => $compact, minify => $minify },
     );
@@ -240,13 +234,14 @@ sub recurse_dir {
 }
 
 sub make_file_list {
-    my @args = @_;
+    my ($exclude, @args) = @_;
 
     my @list;
 
     foreach my $arg (@args) {
         unless (-e $arg) { next; } # file exists
         unless (-s $arg or -d $arg) { next; } # file size > 0 or directory (for Win platform)
+        if ($exclude and $arg =~ m/$exclude/) { next; } # file matches exclude regex
 
         if (-d $arg) {
             foreach my $full ( recurse_dir($arg) ) {
@@ -313,7 +308,7 @@ sub runtime_source_code {
     push @runtime, $Jemplate_Runtime->kernel if $runtime;
 
     push @runtime, $Jemplate_Runtime->json2 if $json =~ m/^json2?$/i;
-    
+
     push @runtime, $Jemplate_Runtime->ajax_xhr if $ajax eq "xhr";
     push @runtime, $Jemplate_Runtime->ajax_jquery if $ajax eq "jquery";
     push @runtime, $Jemplate_Runtime->ajax_yui if $ajax eq "yui";
@@ -399,7 +394,7 @@ sub _preamble {
    Template Toolkit. Any changes made to this file will be lost the next
    time the templates are compiled.
 
-   Copyright 2006-2008 - Ingy döt Net - All rights reserved.
+   Copyright 2006-2014 - Ingy döt Net - All rights reserved.
 */
 
 var Jemplate;
@@ -414,6 +409,18 @@ if (typeof(Jemplate) == 'undefined')
 }
 
 1;
+
+__END__
+
+=encoding utf8
+
+=head1 NAME
+
+Jemplate - JavaScript Templating with Template Toolkit
+
+=head1 NAME
+
+Jemplate - JavaScript Templating with Template Toolkit
 
 =head1 SYNOPSIS
 
@@ -496,7 +503,7 @@ The Jemplate.js JavaScript runtime module has the following API method:
 The C<template-name> is a string like C<'body.html'> that is the name of
 the top level template that you wish to process.
 
-The optional C<data> specififies the data object to be used by the
+The optional C<data> specifies the data object to be used by the
 templates. It can be an object, a function or a url. If it is an object,
 it is used directly. If it is a function, the function is called and the
 returned object is used. If it is a url, an asynchronous <Ajax.get> is
@@ -539,7 +546,7 @@ $module_path. Returns 1 if successful, undef if error.
 =item Jemplate->compile_module_cached($module_path, \@template_file_paths);
 
 Similar to `compile_module`, but only compiles if one of the templates
-is newer than the module. Returns 1 if sucessful compile, 0 if no
+is newer than the module. Returns 1 if successful compile, 0 if no
 compile due to cache, undef if error.
 
 =back
@@ -606,7 +613,7 @@ Jemplate now supports almost all the TT directives, including:
   * [% LAST %]
   * [% CLEAR %]
   * [%# this is a comment %]
-  * [% MACRO name(param1, param2) BLOCK %] ... [% END %]  
+  * [% MACRO name(param1, param2) BLOCK %] ... [% END %]
 
 ALL of the string virtual functions are supported.
 
@@ -678,3 +685,14 @@ David A. Coffey <dacoffey@cogsmith.com>
 Robert Krimen <robertkrimen@gmail.com>
 
 Nickolay Platonov <nickolay8@gmail.com>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (c) 2006-2014. Ingy döt Net.
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
+
+See http://www.perl.com/perl/misc/Artistic.html
+
+=cut

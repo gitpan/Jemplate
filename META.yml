@@ -2,34 +2,25 @@
 abstract: 'JavaScript Templating with Template Toolkit'
 author:
   - 'Ingy döt Net <ingy@cpan.org>'
-build_requires:
-  ExtUtils::MakeMaker: 6.59
+build_requires: {}
 configure_requires:
-  ExtUtils::MakeMaker: 6.59
-distribution_type: module
-dynamic_config: 1
-generated_by: 'Module::Install version 1.06'
+  ExtUtils::MakeMaker: '6.30'
+dynamic_config: 0
+generated_by: 'Dist::Zilla version 5.013, CPAN::Meta::Converter version 2.133380'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
-  version: 1.4
-module_name: Jemplate
+  version: '1.4'
 name: Jemplate
 no_index:
   directory:
     - examples
-    - inc
-    - t
 requires:
-  File::Find::Rule: 0.30
-  Filter::Util::Call: 0
-  Template: 2.14
-  perl: 5.6.1
+  File::Find::Rule: '0.30'
+  Template: '2.19'
+  perl: v5.8.1
 resources:
-  homepage: https://github.com/ingydotnet/jemplate/tree
-  license: http://dev.perl.org/licenses/
-  repository:
-    type: git
-    url: git://github.com/ingydotnet/jemplate.git
-    web: https://github.com/ingydotnet/jemplate/tree
-version: 0.27
+  bugtracker: https://github.com/ingydotnet/jemplate/issues
+  homepage: https://github.com/ingydotnet/jemplate
+  repository: https://github.com/ingydotnet/jemplate.git
+version: '0.28'

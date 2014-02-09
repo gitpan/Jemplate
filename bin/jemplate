@@ -4,10 +4,14 @@
 # This section of code will be replaced by lots of inline Perl modules
 # to make the standalone jemplate script.
 use lib 'lib';
-use Jemplate 0.22;
+use Jemplate;
 #BOOTSTRAP-END
 
 Jemplate->main(@ARGV);
+
+__END__
+
+=encoding UTF-8
 
 =head1 Usage:
 
@@ -59,6 +63,7 @@ Where C<compile-opt> can include:
     --eval
     --noeval
     -s, --source
+    --exclude
 
     See below for more information
     
@@ -144,5 +149,8 @@ These compile time options are specific to Jemplate.
     -s, --source
         Include the original template source code as a JavaScript
         comment next to each compiled template.
+
+    --exclude
+        Exclude any file matching the given regular expression.
 
 =cut
